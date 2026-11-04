@@ -222,6 +222,7 @@ class Shell:
 
     # ================================================================== focus
     def set_focus(self, focus):
+        self.pad.set_exclusive(False)          # filet de sécurité : jamais de manette réservée hors menu
         self.focus = focus
         self.update_mapper()
         if focus == "home":
@@ -356,6 +357,9 @@ class Shell:
         if interactive:
             self.focus = "panel"
             self.update_mapper()
+            if self.panel_return == "app":
+                # La manette ne sert plus qu'au menu : l'appli dessous (Moonlight…) ne reçoit plus rien.
+                self.pad.set_exclusive(True)
         self.panel.show(interactive)
         self.panel.surface.emit("open", {"mode": mode, "data": data or {},
                                          "settings": {"osk_layout": self.settings["osk_layout"],
@@ -377,6 +381,7 @@ class Shell:
                 then()
         later(160, finish)
         if was_interactive:
+            self.pad.set_exclusive(False)
             self.focus = self.panel_return if self.panel_return != "panel" else "home"
             if self.focus == "app" and not self.apps.current():
                 self.focus = "home"

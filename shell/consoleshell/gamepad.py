@@ -6,6 +6,9 @@
   appui court/long sur le bouton Xbox) envoyés à la boucle principale.
 - En mode « navigateur », pilote directement la souris/clavier virtuels
   (latence minimale) via Mapper.
+- Pendant un menu de la console ouvert au-dessus d'une appli, lecture EXCLUSIVE
+  (EVIOCGRAB) : Moonlight, émulateurs et pages web ne reçoivent plus les appuis
+  qui servent à naviguer dans le menu.
 """
 import ctypes
 import os
@@ -40,6 +43,39 @@ STICK_ON, STICK_OFF = 0.55, 0.35
 TRIGGER_ON, TRIGGER_OFF = 0.6, 0.3
 REPEAT_DELAY, REPEAT_RATE, REPEAT_FAST = 0.38, 0.11, 0.06
 
+# Codes evdev (linux/input-event-codes.h) pour la lecture exclusive.
+EV_KEY, EV_ABS = 1, 3
+ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_GAS, ABS_BRAKE = 0, 1, 2, 3, 4, 5, 9, 10
+ABS_HAT0X, ABS_HAT0Y = 16, 17
+RAW_BUTTONS = {
+    0x130: "a", 0x131: "b",                       # BTN_SOUTH, BTN_EAST
+    0x136: "lb", 0x137: "rb",                     # BTN_TL, BTN_TR
+    0x13a: "back", 0x13b: "start", 0x13c: "guide",  # BTN_SELECT, BTN_START, BTN_MODE
+    0x13d: "ls", 0x13e: "rs",                     # BTN_THUMBL, BTN_THUMBR
+    0x220: "up", 0x221: "down", 0x222: "left", 0x223: "right",  # BTN_DPAD_*
+    172: "guide", 158: "back", 167: "share",      # KEY_HOMEPAGE, KEY_BACK, KEY_RECORD (Xbox BLE sans xpadneo)
+}
+
+
+def raw_layout(dev, kind=None):
+    """Codes evdev d'une manette → boutons et axes de la console (spécification « gamepad » du noyau)."""
+    buttons = dict(RAW_BUTTONS)
+    # Xbox (xpad, xpadneo, pilote générique) : BTN_X/BTN_Y = X/Y. PlayStation : nord = Y, ouest = X.
+    buttons.update({0x133: "y", 0x134: "x"} if kind == "playstation" else {0x133: "x", 0x134: "y"})
+    absinfo = dict(dev.capabilities().get(EV_ABS, []))
+    if ABS_BRAKE in absinfo or ABS_GAS in absinfo:      # Xbox Bluetooth LE avec le pilote générique
+        triggers, right = (ABS_BRAKE, ABS_GAS), (ABS_Z, ABS_RZ)
+    else:                                                # xpadneo, xpad, PlayStation…
+        triggers, right = (ABS_Z, ABS_RZ), (ABS_RX, ABS_RY)
+    wanted = {ABS_X: (0, "stick"), ABS_Y: (1, "stick"), right[0]: (2, "stick"), right[1]: (3, "stick"),
+              triggers[0]: (4, "trigger"), triggers[1]: (5, "trigger")}
+    axes = {}
+    for code, (idx, kind_) in wanted.items():
+        info = absinfo.get(code)
+        if info is not None and info.max > info.min:
+            axes[code] = (idx, kind_, info.min, info.max)
+    return {"buttons": buttons, "axes": axes}
+
 
 class Pad:
     def __init__(self, gc, instance_id, info):
@@ -55,6 +91,11 @@ class Pad:
         self.guide_long_sent = False
         self.last_input = time.monotonic()
         self.power = None
+        self.path = None        # nœud evdev (/dev/input/eventN), pour la lecture exclusive
+        self.dev = None         # périphérique evdev « saisi » pendant un menu de la console
+        self.raw = None         # correspondance codes evdev → boutons/axes
+        self.hat = [0, 0]
+        self.grab_failed = False
 
 
 class GamepadThread(threading.Thread):
@@ -69,10 +110,15 @@ class GamepadThread(threading.Thread):
         self.requests = queue.Queue()
         self._last_activity_emit = 0.0
         self._last_power_check = 0.0
+        self.exclusive = False
 
     # ------------------------------------------------------------- API ----
     def rumble(self, strength=0.35, ms=180, pad_id=None):
         self.requests.put(("rumble", strength, ms, pad_id))
+
+    def set_exclusive(self, on):
+        """Menu de la console ouvert au-dessus d'une appli : la manette n'est plus lue que par la console."""
+        self.requests.put(("exclusive", bool(on)))
 
     def connected(self):
         return [dict(p.info, power=p.power) for p in self.pads.values()]
@@ -107,10 +153,12 @@ class GamepadThread(threading.Thread):
             while sdl2.SDL_PollEvent(ctypes.byref(event)):
                 self._handle_event(event)
             self._process_requests()
+            if self.exclusive:
+                self._exclusive_tick()
             now = time.monotonic()
             dt, last = now - last, now
             self._tick(now, dt)
-            busy = self.mapper_mode or any(
+            busy = self.mapper_mode or self.exclusive or any(
                 p.held or p.stick_dir or abs(p.axes[0]) > 0.1 or abs(p.axes[1]) > 0.1
                 or abs(p.axes[2]) > 0.1 or abs(p.axes[3]) > 0.1 or p.guide_down
                 for p in self.pads.values())
@@ -131,6 +179,106 @@ class GamepadThread(threading.Thread):
                             sdl2.SDL_GameControllerRumble(pad.gc, level, level, ms)
                         except Exception:  # noqa: BLE001
                             pass
+            elif req[0] == "exclusive":
+                self.exclusive = req[1]
+                if not self.exclusive:
+                    for pad in self.pads.values():
+                        self._ungrab(pad)
+
+    # ------------------------------------------------------- lecture exclusive ----
+    # EVIOCGRAB réserve les évènements de la manette à la console : ni l'appli (SDL de Moonlight…),
+    # ni le SDL de la console ne les voient ; on les lit donc directement (evdev) le temps du menu.
+    def _exclusive_tick(self):
+        for pad in list(self.pads.values()):
+            if pad.dev is None:
+                # On attend que tout soit relâché (bouton Xbox de l'appui long compris) : sinon l'appli
+                # dessous garderait un bouton « enfoncé » ou un stick penché pendant tout le menu.
+                if pad.grab_failed or not self._idle(pad):
+                    continue
+                self._grab(pad)
+            if pad.dev is not None:
+                self._read_raw(pad)
+
+    @staticmethod
+    def _idle(pad):
+        return (not pad.held and pad.guide_down is None and pad.stick_dir is None
+                and not any(pad.triggers.values()) and all(abs(v) < 0.25 for v in pad.axes[:4]))
+
+    def _grab(self, pad):
+        try:
+            from evdev import InputDevice  # python3-evdev
+            if not pad.path:
+                raise OSError("nœud evdev inconnu")
+            dev = InputDevice(pad.path)
+            try:
+                dev.grab()
+            except OSError:
+                dev.close()
+                raise
+            pad.raw = raw_layout(dev, pad.info.get("kind"))
+        except Exception as exc:  # noqa: BLE001
+            pad.grab_failed = True
+            log.warning("manette %s : lecture exclusive impossible (%s)", pad.info["name"], exc)
+            return
+        pad.dev, pad.hat = dev, [0, 0]
+        log.info("manette %s : réservée à la console pendant le menu", pad.info["name"])
+
+    def _ungrab(self, pad):
+        pad.grab_failed = False
+        if pad.dev is None:
+            return
+        for fn in (pad.dev.ungrab, pad.dev.close):
+            try:
+                fn()
+            except OSError:
+                pass
+        pad.dev = None
+        # Ce qui a été appuyé pendant le menu n'a jamais existé pour SDL : on repart d'un état neutre,
+        # sans évènement (sinon un bouton resterait « enfoncé » et se répéterait tout seul).
+        pad.held.clear()
+        pad.repeats.clear()
+        pad.stick_dir = None
+        pad.triggers = {"lt": False, "rt": False}
+        pad.axes = [0.0] * 6
+        pad.hat = [0, 0]
+        pad.guide_down, pad.guide_long_sent = None, False
+
+    def _read_raw(self, pad):
+        try:
+            events = list(pad.dev.read())
+        except BlockingIOError:
+            return
+        except OSError:                         # manette éteinte pendant le menu
+            self._ungrab(pad)
+            return
+        for ev in events:
+            if ev.type == EV_KEY and ev.value in (0, 1):
+                name = pad.raw["buttons"].get(ev.code)
+                if name:
+                    self._button(pad, name, ev.value == 1)
+            elif ev.type == EV_ABS:
+                if ev.code in (ABS_HAT0X, ABS_HAT0Y):
+                    self._hat(pad, ev.code - ABS_HAT0X, ev.value)
+                    continue
+                axis = pad.raw["axes"].get(ev.code)
+                if axis:
+                    idx, kind, lo, hi = axis
+                    v = (ev.value - lo) / (hi - lo)
+                    pad.axes[idx] = max(-1.0, min(1.0, v if kind == "trigger" else 2 * v - 1))
+                    if abs(pad.axes[idx]) > 0.3:
+                        self._activity(pad)
+
+    def _hat(self, pad, axis, value):
+        neg, pos = ("left", "right") if axis == 0 else ("up", "down")
+        value = (value > 0) - (value < 0)
+        old = pad.hat[axis]
+        if value == old:
+            return
+        if old:
+            self._button(pad, neg if old < 0 else pos, False)
+        pad.hat[axis] = value
+        if value:
+            self._button(pad, neg if value < 0 else pos, True)
 
     # ------------------------------------------------------------ events ----
     # Surtout pas « _handle » : depuis Python 3.13, threading.Thread range son propre objet dans
@@ -144,6 +292,7 @@ class GamepadThread(threading.Thread):
         elif t == sdl2.SDL_CONTROLLERDEVICEREMOVED:
             pad = self.pads.pop(ev.cdevice.which, None)
             if pad:
+                self._ungrab(pad)
                 sdl2.SDL_GameControllerClose(pad.gc)
                 log.info("manette déconnectée : %s", pad.info["name"])
                 if self.mapper:
@@ -194,6 +343,11 @@ class GamepadThread(threading.Thread):
         info = {"id": instance, "name": name, "joystick_name": jname,
                 "guid": guid_buf.value.decode(), "kind": ctype}
         pad = Pad(gc, instance, info)
+        try:
+            raw_path = sdl2.SDL_JoystickPath(joy) if hasattr(sdl2, "SDL_JoystickPath") else None
+            pad.path = raw_path.decode() if raw_path else None
+        except Exception:  # noqa: BLE001
+            pad.path = None
         self.pads[instance] = pad
         pad.power = self._power(pad)
         log.info("manette connectée : %s (%s, %s)", name, ctype, info["guid"])

@@ -264,5 +264,119 @@ class ThreadTests(unittest.TestCase):
         self.assertTrue(callable(GamepadThread(lambda ev: None)._handle_event))
 
 
+class ExclusivePadTests(unittest.TestCase):
+    """Menu de la console au-dessus d'une appli : manette réservée (EVIOCGRAB), lue en evdev brut."""
+
+    def setUp(self):
+        import collections
+        import types
+        from consoleshell import gamepad
+        self.gp = gamepad
+        Ev = collections.namedtuple("Ev", "type code value")
+        self.Ev = Ev
+        Abs = collections.namedtuple("Abs", "value min max fuzz flat resolution")
+        test = self
+
+        class FakeDevice:
+            abs_codes = {0: (-32768, 32767), 1: (-32768, 32767), 3: (-32768, 32767), 4: (-32768, 32767),
+                         2: (0, 1023), 5: (0, 1023), 16: (-1, 1), 17: (-1, 1)}
+
+            def __init__(self, path):
+                self.path, self.grabbed, self.closed, self.queue = path, False, False, []
+                test.devices.append(self)
+
+            def grab(self):
+                self.grabbed = True
+
+            def ungrab(self):
+                self.grabbed = False
+
+            def close(self):
+                self.closed = True
+
+            def capabilities(self):
+                return {3: [(c, Abs(0, lo, hi, 0, 0, 0)) for c, (lo, hi) in self.abs_codes.items()]}
+
+            def read(self):
+                if self.queue == "gone":
+                    raise OSError(19, "No such device")
+                if not self.queue:
+                    raise BlockingIOError
+                out, self.queue = self.queue, []
+                return out
+
+        self.devices = []
+        self.FakeDevice = FakeDevice
+        self._saved = sys.modules.get("evdev")
+        sys.modules["evdev"] = types.SimpleNamespace(InputDevice=FakeDevice)
+        self._on_main = gamepad.on_main
+        gamepad.on_main = lambda fn, *a, **k: fn(*a, **k)
+        self.events = []
+        self.t = gamepad.GamepadThread(self.events.append)
+        self.pad = gamepad.Pad(None, 7, {"id": 7, "name": "Xbox Wireless Controller", "kind": "xbox"})
+        self.pad.path = "/dev/input/event23"
+        self.t.pads[7] = self.pad
+
+    def tearDown(self):
+        self.gp.on_main = self._on_main
+        if self._saved is None:
+            sys.modules.pop("evdev", None)
+        else:
+            sys.modules["evdev"] = self._saved
+
+    def step(self, *events):
+        if events:
+            self.devices[-1].queue = list(events)
+        self.t._process_requests()
+        if self.t.exclusive:
+            self.t._exclusive_tick()
+        self.t._tick(__import__("time").monotonic(), 0.01)
+
+    def names(self):
+        out = [(e["type"], e.get("button")) for e in self.events if e["type"] in ("button", "button-up", "guide")]
+        self.events.clear()
+        return out
+
+    def test_waits_for_release_then_reads_raw_and_releases_cleanly(self):
+        Ev = self.Ev
+        self.t._button(self.pad, "guide", True)          # appui long en cours (vu par SDL)
+        self.t.set_exclusive(True)
+        self.step()
+        self.assertEqual(self.devices, [], "pas de saisie tant que le bouton Xbox est enfoncé")
+        self.t._button(self.pad, "guide", False)          # relâché : Moonlight a vu appui + relâchement
+        self.step()
+        self.assertTrue(self.devices and self.devices[-1].grabbed)
+        self.names()
+        self.step(Ev(3, 17, 1), Ev(3, 17, 0), Ev(1, 0x130, 1), Ev(1, 0x130, 0), Ev(1, 0x133, 1))
+        self.assertEqual(self.names(), [("button", "down"), ("button-up", "down"), ("button", "a"),
+                                        ("button-up", "a"), ("button", "x")])
+        self.step(Ev(3, 1, 32767))                        # stick gauche vers le bas → navigation
+        self.assertIn(("button", "down"), self.names())
+        self.step(Ev(1, 172, 1), Ev(1, 172, 0))           # bouton Xbox des manettes BLE (KEY_HOMEPAGE)
+        self.assertIn(("guide", None), self.names())
+        self.t.set_exclusive(False)                       # menu fermé (X et stick encore tenus)
+        self.step()
+        dev = self.devices[-1]
+        self.assertTrue(dev.closed and not dev.grabbed)
+        self.assertEqual((self.pad.held, self.pad.stick_dir, self.pad.axes), ({}, None, [0.0] * 6))
+
+    def test_controller_switched_off_during_menu(self):
+        self.t.set_exclusive(True)
+        self.step()
+        self.devices[-1].queue = "gone"
+        self.step()
+        self.assertTrue(self.devices[-1].closed)
+        self.assertIsNone(self.pad.dev)
+
+    def test_layouts(self):
+        lay = self.gp.raw_layout(self.FakeDevice("/x"), "xbox")
+        self.assertEqual((lay["buttons"][0x133], lay["axes"][2][1], lay["axes"][3][0]), ("x", "trigger", 2))
+        self.assertEqual(self.gp.raw_layout(self.FakeDevice("/x"), "playstation")["buttons"][0x133], "y")
+        self.FakeDevice.abs_codes = {0: (0, 65535), 1: (0, 65535), 2: (0, 65535), 5: (0, 65535),
+                                     9: (0, 1023), 10: (0, 1023)}
+        ble = self.gp.raw_layout(self.FakeDevice("/x"), "xbox")["axes"]   # Xbox BLE, pilote générique
+        self.assertEqual((ble[10][0], ble[9][0], ble[2][0], ble[5][0]), (4, 5, 2, 3))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

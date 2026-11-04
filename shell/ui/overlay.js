@@ -15,6 +15,7 @@ Shell.on('open', ({ mode, data, settings }) => {
   O.mode = mode; O.data = data || {}; O.settings = settings || {}; O.i = 0; O.sub = null;
   Sound.enabled = O.settings.ui_sounds !== false;
   root.classList.remove('closing');
+  root.innerHTML = '';     // nouvelle ouverture : on repart d'un écran vide (animations d'entrée)
   if (mode === 'menu') { O.volume = (O.data.volume || {}).volume; Sound.select(); }
   render();
 });
@@ -98,8 +99,6 @@ function renderMenu() {
   const sel = items.filter(x => !x.sep);
   O.i = Math.max(0, Math.min(O.i, sel.length - 1));
   const k = KIND[(d.app || {}).kind] || KIND.game;
-  document.documentElement.style.setProperty('--accent', k.c[0]);
-  document.documentElement.style.setProperty('--accent-2', k.c[1]);
   let n = -1;
   const rows = items.map(x => {
     if (x.sep) return '<div class="qi sep"></div>';
@@ -109,13 +108,27 @@ function renderMenu() {
     return `<div class="qi${x.danger ? ' danger' : ''}${n === O.i ? ' focus' : ''}">${icon(x.icon)}<span>${esc(x.label)}</span><span class="right">${right}</span></div>`;
   }).join('');
   const pads = (d.pads || []).map(p => `${icon('gamepad')} ${typeof p.power === 'number' ? p.power + ' %' : ''}`).join(' ');
-  root.innerHTML = `<div class="dim"></div><div class="qm">
-    <div class="qm-head"><div class="app-ic">${icon(k.icon)}</div>
-      <div><h1>${esc(d.title || (d.app || {}).title || 'Console')}</h1><p>${O.sub === 'tabs' ? 'Onglets ouverts' : d.app ? 'En cours' : ''}</p></div>
-      <div class="time num">${clock()}</div></div>
-    <div class="qm-list"><div class="inner">${rows}</div></div>
-    <div class="qm-foot"><span>${pads}</span><span class="hints">${hints([['a', 'OK'], ['b', 'Retour']])}</span></div></div>`;
-  const list = $('.qm-list', root), focus = $('.qi.focus', root), inner = $('.inner', root);
+  // Le cadre du menu n'est construit qu'à l'ouverture (avec ses animations d'entrée). Ensuite, seules
+  // les parties qui changent sont mises à jour : tout reconstruire à chaque appui relançait le fondu du
+  // voile et le glissement du panneau, d'où un clignotement pendant la navigation.
+  let qm = $('.qm', root);
+  if (!qm) {
+    document.documentElement.style.setProperty('--accent', k.c[0]);
+    document.documentElement.style.setProperty('--accent-2', k.c[1]);
+    root.innerHTML = `<div class="dim"></div><div class="qm">
+      <div class="qm-head"><div class="app-ic"></div><div><h1></h1><p></p></div><div class="time num"></div></div>
+      <div class="qm-list"><div class="inner"></div></div>
+      <div class="qm-foot"><span class="pads"></span><span class="hints">${hints([['a', 'OK'], ['b', 'Retour']])}</span></div></div>`;
+    qm = $('.qm', root);
+  }
+  const setHTML = (el, html) => { if (el.innerHTML !== html) el.innerHTML = html; };
+  setHTML($('.app-ic', qm), icon(k.icon));
+  $('.qm-head h1', qm).textContent = d.title || (d.app || {}).title || 'Console';
+  $('.qm-head p', qm).textContent = O.sub === 'tabs' ? 'Onglets ouverts' : d.app ? 'En cours' : '';
+  $('.time', qm).textContent = clock();
+  setHTML($('.inner', qm), rows);
+  setHTML($('.pads', qm), pads);
+  const list = $('.qm-list', qm), focus = $('.qi.focus', qm), inner = $('.inner', qm);
   if (focus && list) {
     const over = focus.offsetTop + focus.offsetHeight - list.clientHeight + 16;
     inner.style.transform = `translateY(${-Math.max(0, over)}px)`;
