@@ -4,7 +4,7 @@
 #  de salon : écran d'accueil à la manette, Moonlight, émulation (ES-DE),
 #  Brave pilotable à la manette, veille/réveil par la manette.
 #
-#  Usage :  sudo ./install.sh [options]
+#  Usage :  sudo ./install.sh [options]     (ou, en root via « su - » :  ./install.sh [options])
 #     --user NOM            utilisateur de la console (défaut : celui qui lance sudo, sinon UID 1000)
 #     --name NOM            nom affiché de la console (défaut : Nova)
 #     --smb-password MDP    mot de passe du partage réseau « Jeux » (sinon demandé)
@@ -48,7 +48,7 @@ while (($#)); do
   shift
 done
 
-[[ $EUID -eq 0 ]] || die "Lance ce script avec sudo :  sudo $0 $*"
+[[ $EUID -eq 0 ]] || die "Lance ce script en root :  sudo $0 $*   (ou « su - » puis $0 $*)"
 
 # --- Utilisateur de la console ------------------------------------------------
 if [[ -z $OPT_USER ]]; then

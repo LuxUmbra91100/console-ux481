@@ -4,11 +4,11 @@
 #  Récupère la dernière version du projet puis réapplique l'installation.
 #  Tes réglages, jeux, sauvegardes et manettes associées sont conservés.
 #
-#  Usage :  sudo ./update.sh            (options de install.sh acceptées, ex. --only 80)
+#  Usage :  sudo ./update.sh   (ou en root via « su - »)   — options de install.sh acceptées, ex. --only 80
 # =============================================================================
 set -Eeuo pipefail
 HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-[[ $EUID -eq 0 ]] || { echo "Lance la mise à jour avec sudo :  sudo $0 $*" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "Lance la mise à jour en root :  sudo $0 $*   (ou « su - » puis $0 $*)" >&2; exit 1; }
 
 owner=$(stat -c %U "$HERE")
 if [[ -d $HERE/.git ]]; then

@@ -59,22 +59,52 @@ Avec l'image *netinst* de Debian 13 « trixie » (amd64) :
 
 ## 3. Lancer l'installation
 
-Sur l'UX481 (au clavier, ou en SSH depuis ton PC) :
+Sur l'UX481, au clavier ou en SSH depuis ton PC.
+
+**Cas le plus courant : tu as donné un mot de passe root pendant l'installation de Debian.**
+Dans ce cas, `sudo` n'est pas installé et ton utilisateur n'a pas les droits
+d'administration. Passe root avec `su -` (le tiret compte : il donne accès aux commandes
+d'administration comme `usermod`), puis tape les commandes suivantes dans la même fenêtre :
+
+```bash
+su -
+```
+
+```bash
+U=$(id -nu 1000) && echo "Utilisateur de la console : $U"
+```
+
+```bash
+apt update && apt install -y git sudo && usermod -aG sudo "$U"
+```
+
+```bash
+git clone https://github.com/LuxUmbra91100/console-ux481.git "/home/$U/console-ux481" && chown -R "$U:" "/home/$U/console-ux481"
+```
+
+```bash
+cd "/home/$U/console-ux481" && ./install.sh --user "$U"
+```
+
+`usermod -aG sudo` te donne le droit d'utiliser `sudo` (avec ton propre mot de passe) à
+partir de ta prochaine connexion : pratique pour les mises à jour.
+
+**Si tu as déjà `sudo`** (installation sans mot de passe root) :
 
 ```bash
 sudo apt install -y git
 ```
 
 ```bash
-git clone https://github.com/LuxUmbra91100/console-ux481.git
+git clone https://github.com/LuxUmbra91100/console-ux481.git ~/console-ux481
 ```
 
 ```bash
-cd console-ux481 && sudo ./install.sh
+cd ~/console-ux481 && sudo ./install.sh
 ```
 
 > Sans git : `wget https://github.com/LuxUmbra91100/console-ux481/archive/refs/heads/main.tar.gz`,
-> puis `tar xzf main.tar.gz && cd console-ux481-main && sudo ./install.sh`
+> puis `tar xzf main.tar.gz && cd console-ux481-main && ./install.sh` en root
 > (les mises à jour se feront alors à la main).
 
 Compte **30 à 60 minutes** (plusieurs Go de téléchargements). Le script te demande le mot
@@ -295,6 +325,8 @@ clavier :
 ```bash
 cd ~/console-ux481 && sudo ./update.sh
 ```
+
+(ou, sans sudo : `su -` puis `/home/TON_UTILISATEUR/console-ux481/update.sh`)
 
 Le script récupère la dernière version sur GitHub, réapplique l'installation (tes réglages,
 jeux, sauvegardes et manettes associées sont conservés) et relance l'interface. Redémarre
