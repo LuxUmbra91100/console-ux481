@@ -105,7 +105,7 @@ class GamepadThread(threading.Thread):
         while self.running:
             sdl2.SDL_PumpEvents()
             while sdl2.SDL_PollEvent(ctypes.byref(event)):
-                self._handle(event)
+                self._handle_event(event)
             self._process_requests()
             now = time.monotonic()
             dt, last = now - last, now
@@ -133,10 +133,14 @@ class GamepadThread(threading.Thread):
                             pass
 
     # ------------------------------------------------------------ events ----
-    def _handle(self, ev):
+    # Surtout pas « _handle » : depuis Python 3.13, threading.Thread range son propre objet dans
+    # self._handle, qui masquait cette méthode (la lecture des manettes plantait au 1er évènement).
+    def _handle_event(self, ev):
         t = ev.type
         if t == sdl2.SDL_CONTROLLERDEVICEADDED:
             self._open(ev.cdevice.which)
+        elif t == sdl2.SDL_JOYDEVICEADDED and not sdl2.SDL_IsGameController(ev.jdevice.which):
+            self._unrecognized(ev.jdevice.which)
         elif t == sdl2.SDL_CONTROLLERDEVICEREMOVED:
             pad = self.pads.pop(ev.cdevice.which, None)
             if pad:
@@ -156,6 +160,16 @@ class GamepadThread(threading.Thread):
                 pad.axes[ev.caxis.axis] = max(-1.0, min(1.0, ev.caxis.value / AXIS_MAX))
                 if abs(pad.axes[ev.caxis.axis]) > 0.3:
                     self._activity(pad)
+
+    def _unrecognized(self, index):
+        """Manette vue par SDL mais sans correspondance des boutons : noté pour le dépannage."""
+        try:
+            name = (sdl2.SDL_JoystickNameForIndex(index) or b"?").decode(errors="replace")
+            guid = ctypes.create_string_buffer(33)
+            sdl2.SDL_JoystickGetGUIDString(sdl2.SDL_JoystickGetDeviceGUID(index), guid, 33)
+            log.warning("manette non reconnue par SDL (boutons inconnus) : %s, %s", name, guid.value.decode())
+        except Exception:  # noqa: BLE001
+            pass
 
     def _open(self, index):
         if not sdl2.SDL_IsGameController(index):

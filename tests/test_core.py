@@ -248,5 +248,21 @@ class IniSetTests(unittest.TestCase):
         self.assertTrue(text.rstrip().endswith("[LE]\nMinConnectionInterval = 7"))
 
 
+class ThreadTests(unittest.TestCase):
+    def test_threads_dont_shadow_thread_internals(self):
+        # Python 3.13 range un objet dans Thread._handle : une méthode « _handle » le masquait
+        # et la lecture des manettes plantait au premier évènement (Debian 13).
+        import threading
+        from consoleshell.control import ControlServer
+        from consoleshell.gamepad import GamepadThread
+        from consoleshell.swayipc import SwayEvents
+        internals = set(vars(threading.Thread())) | {"_handle", "_started", "_stop", "_bootstrap"}
+        internals |= {n for n in vars(threading.Thread) if n.startswith("_") and not n.startswith("__")}
+        for cls in (GamepadThread, SwayEvents, ControlServer):
+            clash = internals & set(vars(cls))
+            self.assertFalse(clash, f"{cls.__name__} masque des attributs internes de Thread : {clash}")
+        self.assertTrue(callable(GamepadThread(lambda ev: None)._handle_event))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
