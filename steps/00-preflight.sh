@@ -43,11 +43,7 @@ mkdir -p /run/console-install
 : > /run/console-install/notes
 model=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo inconnu)
 vendor=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || echo inconnu)
-sb=0
-for sbvar in /sys/firmware/efi/efivars/SecureBoot-*; do
-  [[ -e $sbvar ]] || continue
-  [[ $(od -An -t u1 "$sbvar" 2>/dev/null | awk '{print $NF}') == 1 ]] && sb=1
-done
+sb=0; secure_boot_enabled && sb=1
 nv=0; has_nvidia_gpu && nv=1
 {
   echo "MODEL=\"$model\""

@@ -147,3 +147,11 @@ enable_now() { systemctl enable --now "$@" >/dev/null 2>&1 || systemctl enable "
 user_unit_enable() { systemctl --global enable "$@"; }
 
 has_nvidia_gpu() { lspci -n 2>/dev/null | awk '{print $2, $3}' | grep -Eq '^03[0-9]{2}: 10de:'; }
+secure_boot_enabled() { # 0 si le Secure Boot de l'UEFI est actif
+  local v
+  for v in /sys/firmware/efi/efivars/SecureBoot-*; do
+    [[ -e $v ]] || continue
+    [[ $(od -An -t u1 "$v" 2>/dev/null | awk '{print $NF}') == 1 ]] && return 0
+  done
+  return 1
+}
