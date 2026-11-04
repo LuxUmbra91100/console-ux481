@@ -91,14 +91,19 @@ ok "Écran de démarrage « ${CONSOLE_NAME} » installé"
 # --- GRUB : menu caché, démarrage silencieux ---------------------------------------
 if command -v update-grub >/dev/null; then
   install -d /etc/default/grub.d
-  cat > /etc/default/grub.d/console-ux481.cfg <<'EOF'
+  # Réglages matériels utilisés pour CE démarrage (ex. contournement du SSD NVMe qui
+  # décroche : nvme_core.*, pcie_aspm, pcie_port_pm) : conservés, sinon ils seraient perdus.
+  hw_params=$(tr ' ' '\n' < /proc/cmdline | grep -E '^(nvme_core\.|nvme\.|pcie_aspm|pcie_port_pm)' | sort -u | tr '\n' ' ' || true)
+  hw_params=${hw_params% }
+  [[ -n $hw_params ]] && log "Réglages matériels conservés au démarrage : $hw_params"
+  cat > /etc/default/grub.d/console-ux481.cfg <<EOF
 # console-ux481 : démarrage direct et silencieux.
 # Pour afficher le menu GRUB (dépannage) : maintenir Échap ou Maj au démarrage.
 GRUB_TIMEOUT=0
 GRUB_TIMEOUT_STYLE=hidden
 GRUB_RECORDFAIL_TIMEOUT=3
 GRUB_DISABLE_OS_PROBER=true
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 rd.udev.log_level=3 udev.log_level=3 vt.global_cursor_default=0 systemd.show_status=auto rd.systemd.show_status=auto"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=3 rd.udev.log_level=3 udev.log_level=3 vt.global_cursor_default=0 systemd.show_status=auto rd.systemd.show_status=auto${hw_params:+ $hw_params}"
 EOF
   update-grub >/dev/null 2>&1 || warn "update-grub a renvoyé une erreur (voir le journal)."
   ok "GRUB : menu caché, démarrage silencieux"
