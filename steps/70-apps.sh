@@ -64,7 +64,14 @@ elif [[ -n $esde_url ]]; then
     fi
     chmod +x "$tmp/ES-DE.AppImage"
     (cd "$tmp" && ./ES-DE.AppImage --appimage-extract >/dev/null)
-    rm -rf /opt/es-de.new && mv "$tmp/squashfs-root" /opt/es-de.new
+    # Selon l'AppImage, l'extraction donne squashfs-root/, AppDir/, ou squashfs-root -> AppDir (lien
+    # relatif, depuis ES-DE 3.5.0) : on déplace le vrai dossier, sinon le lien pointerait dans le vide.
+    extracted=""
+    for d in "$tmp/squashfs-root" "$tmp/AppDir"; do
+      if [[ -e $d/AppRun ]]; then extracted=$(readlink -f "$d"); break; fi
+    done
+    [[ -n $extracted ]] || die "ES-DE : contenu de l'AppImage inattendu (pas d'AppRun). Relance l'étape 70."
+    rm -rf /opt/es-de.new && mv "$extracted" /opt/es-de.new
     chmod -R a+rX /opt/es-de.new
     rm -rf /opt/es-de && mv /opt/es-de.new /opt/es-de
     echo "$esde_ver" > /opt/es-de/.console-version

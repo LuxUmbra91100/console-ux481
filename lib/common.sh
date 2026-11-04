@@ -43,7 +43,7 @@ run_step() { # run_step /chemin/NN-nom.sh
   name=$(basename "$step" .sh)
   info "Étape ${name}"
   if ! bash "$step"; then
-    die "L'étape ${name} a échoué. Détails : ${CONSOLE_LOG}. Corrige le problème puis relance : sudo ./install.sh --only ${name%%-*}"
+    die "L'étape ${name} a échoué. Détails : ${CONSOLE_LOG}. Corrige le problème puis relance la même commande (ex. sudo ./install.sh) : les étapes déjà faites passent vite."
   fi
 }
 
