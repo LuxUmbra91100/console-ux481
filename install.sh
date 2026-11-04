@@ -19,6 +19,9 @@
 #  Le script est idempotent : on peut le relancer pour réparer ou mettre à jour.
 # =============================================================================
 set -Eeuo pipefail
+# « su » sans tiret ne donne pas à root les commandes d'administration (/usr/sbin, /sbin) :
+# dpkg échouerait (« start-stop-daemon not found in PATH »). On complète le PATH.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 export REPO_DIR

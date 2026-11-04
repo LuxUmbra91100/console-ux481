@@ -63,8 +63,9 @@ Sur l'UX481, au clavier ou en SSH depuis ton PC.
 
 **Cas le plus courant : tu as donné un mot de passe root pendant l'installation de Debian.**
 Dans ce cas, `sudo` n'est pas installé et ton utilisateur n'a pas les droits
-d'administration. Passe root avec `su -` (le tiret compte : il donne accès aux commandes
-d'administration comme `usermod`), puis tape les commandes suivantes dans la même fenêtre :
+d'administration. Passe root avec `su -` (le tiret compte : sans lui, root n'a pas les commandes
+d'administration et `apt` échoue avec « start-stop-daemon not found in PATH »), puis tape les
+commandes suivantes dans la même fenêtre :
 
 ```bash
 su -

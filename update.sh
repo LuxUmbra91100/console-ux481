@@ -7,6 +7,9 @@
 #  Usage :  sudo ./update.sh   (ou en root via « su - »)   — options de install.sh acceptées, ex. --only 80
 # =============================================================================
 set -Eeuo pipefail
+# « su » sans tiret ne donne pas à root les commandes d'administration (/usr/sbin, /sbin) :
+# dpkg échouerait (« start-stop-daemon not found in PATH »). On complète le PATH.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 [[ $EUID -eq 0 ]] || { echo "Lance la mise à jour en root :  sudo $0 $*   (ou « su - » puis $0 $*)" >&2; exit 1; }
 
