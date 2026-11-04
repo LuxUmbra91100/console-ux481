@@ -166,6 +166,7 @@ class Shell:
         self.push(tiles=self.tiles_public())
 
     def on_apps_changed(self):
+        self.update_exclusive()
         self.push(apps=self.apps.public(), tiles=self.tiles_public())
 
     def refresh_status(self):
@@ -222,13 +223,19 @@ class Shell:
 
     # ================================================================== focus
     def set_focus(self, focus):
-        self.pad.set_exclusive(False)          # filet de sécurité : jamais de manette réservée hors menu
         self.focus = focus
         self.update_mapper()
+        self.update_exclusive()
         if focus == "home":
             self.home.surface.emit("shown")
         elif focus == "app":
             self.home.surface.emit("hidden")      # met en pause le fond animé de l'accueil
+
+    def update_exclusive(self):
+        """Manette réservée à la console (lecture exclusive) quand son interface est devant (accueil ou
+        menu) et qu'une appli tourne derrière : Moonlight, par exemple, lit la manette même sans le focus
+        et piloterait le PC en même temps que l'accueil. Libérée dès qu'une appli repasse devant."""
+        self.pad.set_exclusive(self.focus in ("home", "panel") and bool(self.apps.apps))
 
     def update_mapper(self):
         mode = None
@@ -357,9 +364,7 @@ class Shell:
         if interactive:
             self.focus = "panel"
             self.update_mapper()
-            if self.panel_return == "app":
-                # La manette ne sert plus qu'au menu : l'appli dessous (Moonlight…) ne reçoit plus rien.
-                self.pad.set_exclusive(True)
+            self.update_exclusive()            # la manette ne sert plus qu'au menu, pas à l'appli dessous
         self.panel.show(interactive)
         self.panel.surface.emit("open", {"mode": mode, "data": data or {},
                                          "settings": {"osk_layout": self.settings["osk_layout"],
@@ -381,11 +386,11 @@ class Shell:
                 then()
         later(160, finish)
         if was_interactive:
-            self.pad.set_exclusive(False)
             self.focus = self.panel_return if self.panel_return != "panel" else "home"
             if self.focus == "app" and not self.apps.current():
                 self.focus = "home"
             self.update_mapper()
+            self.update_exclusive()
             if self.focus == "home":
                 self.home.surface.emit("shown")
 

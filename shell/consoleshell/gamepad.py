@@ -158,7 +158,7 @@ class GamepadThread(threading.Thread):
             now = time.monotonic()
             dt, last = now - last, now
             self._tick(now, dt)
-            busy = self.mapper_mode or self.exclusive or any(
+            busy = self.mapper_mode or any(
                 p.held or p.stick_dir or abs(p.axes[0]) > 0.1 or abs(p.axes[1]) > 0.1
                 or abs(p.axes[2]) > 0.1 or abs(p.axes[3]) > 0.1 or p.guide_down
                 for p in self.pads.values())

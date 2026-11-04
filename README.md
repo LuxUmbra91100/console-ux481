@@ -158,7 +158,8 @@ La console démarre directement sur la TV avec un assistant :
 | Bouton Xbox **maintenu** | menu rapide même dans Moonlight (où l'appui court part au PC) |
 
 Le jeu se met en **pause** pendant que le menu est ouvert, et la manette ne sert plus qu'au menu :
-l'appli dessous (Moonlight, émulateur, page web) ne reçoit plus aucun appui.
+l'appli dessous (Moonlight, émulateur, page web) ne reçoit plus aucun appui. Même chose sur l'accueil :
+une appli restée ouverte en arrière-plan ne reçoit rien tant que tu n'y es pas revenu.
 
 **Brave**
 
