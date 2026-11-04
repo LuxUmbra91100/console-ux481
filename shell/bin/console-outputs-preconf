@@ -1,0 +1,47 @@
+#!/usr/bin/python3
+"""Écrit la config sway des sorties AVANT le démarrage de sway (d'après /sys/class/drm),
+pour que le tout premier affichage aille directement sur la TV."""
+import glob
+import os
+import re
+
+
+def connectors():
+    for path in sorted(glob.glob("/sys/class/drm/card*-*")):
+        m = re.match(r"card\d+-(.+)$", os.path.basename(path))
+        if not m:
+            continue
+        try:
+            with open(os.path.join(path, "status"), encoding="utf-8") as f:
+                if f.read().strip() != "connected":
+                    continue
+            with open(os.path.join(path, "modes"), encoding="utf-8") as f:
+                modes = [tuple(map(int, l.strip().split("x")[:2])) for l in f
+                         if re.match(r"^\d+x\d+", l.strip())]
+        except (OSError, ValueError):
+            continue
+        yield m.group(1), modes
+
+
+def main():
+    outs = list(connectors())
+    screenpad = lambda modes: any(h and w / h > 3.0 for w, h in modes)  # noqa: E731
+    internal = lambda name, modes: name.startswith(("eDP", "LVDS", "DSI")) or screenpad(modes)  # noqa: E731
+    external = [(n, m) for n, m in outs if not internal(n, m)]
+    print("# généré au démarrage de la session par console-outputs-preconf")
+    if external:
+        for name, modes in external:
+            if (1920, 1080) in modes:
+                print(f"output {name} enable mode 1920x1080 scale 1")
+            else:
+                print(f"output {name} enable")
+        for name, modes in outs:
+            if internal(name, modes):
+                print(f"output {name} disable")
+    else:
+        for name, modes in outs:
+            if screenpad(modes):
+                print(f"output {name} disable")
+
+
+main()

@@ -1,0 +1,42 @@
+#!/usr/bin/python3
+"""console-ctl COMMANDE [ARGS…] — envoie une commande au shell de la console.
+
+Commandes : guide, guide-long, home, power-button, standby, wake, volume +5|-5|mute,
+            notify TEXTE, reload-ui, state
+"""
+import json
+import os
+import socket
+import sys
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    path = os.path.join(runtime, "console-shell.sock")
+    msg = json.dumps({"cmd": sys.argv[1], "args": sys.argv[2:]}) + "\n"
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(6)
+            s.connect(path)
+            s.sendall(msg.encode())
+            data = b""
+            while not data.endswith(b"\n"):
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                data += chunk
+    except OSError as exc:
+        print(f"console-shell injoignable : {exc}", file=sys.stderr)
+        return 1
+    reply = data.decode(errors="replace").strip()
+    if sys.argv[1] == "state":
+        print(json.dumps(json.loads(reply), indent=2, ensure_ascii=False))
+    elif reply and reply != '{"ok": true}':
+        print(reply)
+    return 0
+
+
+sys.exit(main())

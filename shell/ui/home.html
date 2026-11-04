@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Accueil</title>
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="home.css">
+</head>
+<body>
+  <div id="bg">
+    <div class="bg-layer" id="bgA"></div>
+    <div class="bg-layer" id="bgB"></div>
+    <div id="bgArt"></div>
+    <div class="grain"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <header id="top">
+    <div class="who">
+      <div class="avatar" id="avatar">N</div>
+      <div><div class="hello" id="hello">Bonsoir</div><div class="cname" id="cname">Nova</div></div>
+    </div>
+    <div class="status" id="status"></div>
+  </header>
+
+  <main id="main">
+    <section id="rowWrap"><div id="row"></div></section>
+    <section id="caption"><div id="capTitle"></div><div id="capSub"></div></section>
+    <section id="shelf"><div id="shelfTitle"></div><div id="shelfTrack"></div></section>
+  </main>
+
+  <nav id="sys"></nav>
+  <footer id="hints" class="hints"></footer>
+  <div id="layers"></div>
+
+  <script src="common.js"></script>
+  <script>if (!Shell.native) document.write('<script src="mock.js"><\/script>');</script>
+  <script src="home.js"></script>
+</body>
+</html>

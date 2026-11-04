@@ -1,0 +1,73 @@
+#!/bin/bash
+# console-root — petites actions matérielles autorisées à l'utilisateur de la console
+# (via sudo sans mot de passe, voir /etc/sudoers.d/console-ux481). Arguments validés strictement.
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+screenpad_off() {
+  local d
+  for d in /sys/class/backlight/*screenpad*; do
+    [[ -d $d ]] || continue
+    [[ -w $d/brightness ]] && echo 0 > "$d/brightness" 2>/dev/null
+    [[ -w $d/bl_power ]] && echo 4 > "$d/bl_power" 2>/dev/null
+  done
+  return 0
+}
+
+wake_setup() {
+  local hci iface usbdev p
+  # L'adaptateur Bluetooth (USB) peut réveiller la machine : bouton Xbox = réveil.
+  for hci in /sys/class/bluetooth/hci*; do
+    [[ -e $hci/device ]] || continue
+    iface=$(readlink -f "$hci/device")
+    usbdev=$(dirname "$iface")
+    [[ -w $usbdev/power/wakeup ]] && echo enabled > "$usbdev/power/wakeup" 2>/dev/null
+  done
+  # Le contrôleur USB lui-même doit être autorisé à réveiller (ACPI + PCI).
+  if grep -Eq '^XHC[0-9]?\s.*\*disabled' /proc/acpi/wakeup 2>/dev/null; then
+    for p in $(awk '/^XHC[0-9]?\s.*\*disabled/ {print $1}' /proc/acpi/wakeup); do
+      echo "$p" > /proc/acpi/wakeup 2>/dev/null
+    done
+  fi
+  for p in /sys/bus/pci/devices/*; do
+    [[ $(cat "$p/class" 2>/dev/null) == 0x0c0330 && -w $p/power/wakeup ]] \
+      && echo enabled > "$p/power/wakeup" 2>/dev/null
+  done
+  return 0
+}
+
+rtc_alarm() {
+  local rtc=/sys/class/rtc/rtc0/wakealarm arg=${1:-}
+  [[ -w $rtc ]] || { echo "pas d'horloge RTC réveillable" >&2; exit 3; }
+  echo 0 > "$rtc"
+  if [[ $arg == clear ]]; then
+    return 0
+  elif [[ $arg =~ ^[0-9]{1,4}$ ]] && (( arg >= 10 )); then
+    echo "+$arg" > "$rtc"
+  else
+    echo "usage : rtc-alarm SECONDES|clear" >&2; exit 2
+  fi
+}
+
+mem_sleep() {
+  local mode=${1:-}
+  [[ $mode == s2idle || $mode == deep ]] || { echo "mode invalide" >&2; exit 2; }
+  grep -qw "$mode" /sys/power/mem_sleep || { echo "mode $mode non pris en charge" >&2; exit 3; }
+  echo "$mode" > /sys/power/mem_sleep
+  mkdir -p /etc/systemd/sleep.conf.d
+  printf '# console-ux481 : mode de veille choisi dans les réglages\n[Sleep]\nMemorySleepMode=%s\n' "$mode" \
+    > /etc/systemd/sleep.conf.d/60-console-memsleep.conf
+}
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  hw-init|post-resume) screenpad_off; wake_setup ;;
+  pre-sleep) wake_setup ;;
+  screenpad-off) screenpad_off ;;
+  rtc-alarm) rtc_alarm "$@" ;;
+  mem-sleep) mem_sleep "$@" ;;
+  *) echo "usage : console-root hw-init|post-resume|pre-sleep|screenpad-off|rtc-alarm N|clear|mem-sleep s2idle|deep" >&2
+     exit 2 ;;
+esac
+exit 0

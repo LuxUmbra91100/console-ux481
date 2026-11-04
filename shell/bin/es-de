@@ -1,0 +1,3 @@
+#!/bin/sh
+# Lanceur d'ES-DE (AppImage extraite dans /opt/es-de : démarrage plus rapide, sans FUSE).
+exec /opt/es-de/AppRun "$@"

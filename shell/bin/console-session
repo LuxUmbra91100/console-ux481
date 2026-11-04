@@ -1,0 +1,26 @@
+#!/bin/sh
+# Lancé par greetd (connexion automatique) : démarre le compositeur de la console.
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=sway
+export XDG_SESSION_DESKTOP=sway
+export MOZ_ENABLE_WAYLAND=1
+export LIBVA_DRIVER_NAME=iHD
+export SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+export _JAVA_AWT_WM_NONREPARENTING=1
+export XCURSOR_THEME=Adwaita
+export XCURSOR_SIZE=32
+# Réglages personnels éventuels (variables d'environnement)
+[ -r "$HOME/.config/console/session.env" ] && . "$HOME/.config/console/session.env"
+
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+/opt/console/bin/console-outputs-preconf > "$XDG_RUNTIME_DIR/console-outputs.conf" 2>/dev/null \
+  || : > "$XDG_RUNTIME_DIR/console-outputs.conf"
+
+start=$(date +%s)
+systemd-cat -t sway sway --config /etc/console/sway.conf
+status=$?
+# Si sway s'arrête tout de suite (problème graphique), on évite une boucle de relance trop rapide.
+[ $(( $(date +%s) - start )) -lt 10 ] && sleep 3
+systemctl --user stop console-session.target graphical-session.target 2>/dev/null
+exit $status
