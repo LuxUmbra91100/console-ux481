@@ -1,17 +1,43 @@
 /* Console UX481 — écran d'accueil */
 
-/* ---- Fond animé (couleur de la tuile sélectionnée) ---- */
-#bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--bg); }
-.bg-layer { position: absolute; inset: -10%; opacity: 0; transition: opacity .9s var(--ease); will-change: opacity; }
-.bg-layer.on { opacity: 1; }
-#bgArt { position: absolute; inset: -6%; background-size: cover; background-position: center; opacity: 0;
-  filter: blur(3.2rem) saturate(1.25) brightness(.55); transform: scale(1.08); transition: opacity 1s var(--ease); }
-#bgArt.on { opacity: .55; }
-.grain { position: absolute; inset: 0; opacity: .06; mix-blend-mode: overlay;
+/* ---- Fond animé : aurores lentes, indépendantes de la tuile sélectionnée ----
+   Calques peints une seule fois puis animés uniquement en transform/opacity : l'animation
+   tourne dans le compositeur (GPU) sans jamais repeindre la page. En pause quand une appli
+   ou un jeu est au premier plan (classe bg-paused). */
+#bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  background: radial-gradient(130% 95% at 50% -12%, #0c1230 0%, #080b1a 50%, var(--bg) 100%); }
+#bg > div { position: absolute; }
+.aurora { will-change: transform, opacity; animation: 60s ease-in-out infinite alternate; }
+.aurora.a1 { width: 92vw; height: 46vh; left: -22vw; top: -14vh; animation-name: aur1; animation-duration: 47s;
+  background: radial-gradient(closest-side, rgba(124, 92, 255, .6), rgba(124, 92, 255, .2) 55%, rgba(124, 92, 255, 0)); }
+.aurora.a2 { width: 80vw; height: 58vh; right: -24vw; top: -6vh; animation-name: aur2; animation-duration: 61s;
+  background: radial-gradient(closest-side, rgba(43, 108, 255, .5), rgba(43, 108, 255, .15) 58%, rgba(43, 108, 255, 0)); }
+.aurora.a3 { width: 96vw; height: 50vh; left: -8vw; bottom: -18vh; animation-name: aur3; animation-duration: 73s;
+  background: radial-gradient(closest-side, rgba(25, 190, 210, .34), rgba(25, 190, 210, .1) 60%, rgba(25, 190, 210, 0)); }
+.aurora.a4 { width: 52vw; height: 52vh; left: 40vw; top: 26vh; animation-name: aur4; animation-duration: 53s;
+  background: radial-gradient(closest-side, rgba(200, 76, 255, .3), rgba(200, 76, 255, .09) 60%, rgba(200, 76, 255, 0)); }
+@keyframes aur1 { from { transform: translate3d(0, 0, 0) rotate(-14deg) scale(1); }
+                  to   { transform: translate3d(30vw, 12vh, 0) rotate(4deg) scale(1.18); } }
+@keyframes aur2 { from { transform: translate3d(0, 0, 0) rotate(10deg) scale(1.05); }
+                  to   { transform: translate3d(-26vw, 18vh, 0) rotate(-8deg) scale(.92); } }
+@keyframes aur3 { from { transform: translate3d(0, 0, 0) rotate(6deg) scale(1); opacity: .7; }
+                  to   { transform: translate3d(18vw, -14vh, 0) rotate(-6deg) scale(1.2); opacity: 1; } }
+@keyframes aur4 { 0%   { transform: translate3d(-16vw, -8vh, 0) scale(.85); opacity: .35; }
+                  50%  { opacity: 1; }
+                  100% { transform: translate3d(14vw, 10vh, 0) scale(1.15); opacity: .55; } }
+/* Poussières qui montent doucement : motif répété, décalé d'exactement un motif (boucle invisible). */
+.dust { left: 0; right: 0; top: 0; height: calc(100% + 30rem); opacity: .5; will-change: transform;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='600' height='600'><g fill='white'><circle cx='55' cy='84' r='1.9' opacity='0.6'/><circle cx='157' cy='25' r='1.9' opacity='0.85'/><circle cx='225' cy='46' r='0.9' opacity='0.3'/><circle cx='381' cy='61' r='1.5' opacity='0.6'/><circle cx='459' cy='23' r='0.7' opacity='0.7'/><circle cx='158' cy='172' r='1.3' opacity='0.6'/><circle cx='226' cy='129' r='1.1' opacity='0.6'/><circle cx='543' cy='154' r='0.8' opacity='0.85'/><circle cx='71' cy='251' r='0.7' opacity='0.3'/><circle cx='119' cy='219' r='1.1' opacity='0.6'/><circle cx='427' cy='284' r='0.7' opacity='0.6'/><circle cx='567' cy='244' r='1' opacity='0.85'/><circle cx='17' cy='337' r='1.5' opacity='0.3'/><circle cx='211' cy='347' r='1.9' opacity='0.4'/><circle cx='325' cy='351' r='0.9' opacity='0.6'/><circle cx='419' cy='344' r='1' opacity='0.3'/><circle cx='588' cy='374' r='1.1' opacity='0.3'/><circle cx='42' cy='478' r='0.8' opacity='0.3'/><circle cx='127' cy='431' r='1.3' opacity='0.5'/><circle cx='216' cy='427' r='1' opacity='0.3'/><circle cx='340' cy='446' r='1.9' opacity='0.7'/><circle cx='560' cy='435' r='1' opacity='0.7'/><circle cx='25' cy='569' r='1' opacity='0.85'/><circle cx='181' cy='558' r='1.5' opacity='0.3'/><circle cx='429' cy='566' r='1.1' opacity='0.6'/><circle cx='558' cy='533' r='0.9' opacity='0.85'/></g></svg>") 0 0 / 30rem 30rem repeat;
+  animation: dust 150s linear infinite; }
+@keyframes dust { to { transform: translate3d(0, -30rem, 0); } }
+/* Grain fixe (évite les bandes de couleur des dégradés sur la TV) : fusion normale, peu coûteuse. */
+.grain { inset: 0; opacity: .035;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"); }
 .vignette { position: absolute; inset: 0;
   background: radial-gradient(120% 90% at 50% 20%, transparent 40%, rgba(2, 3, 8, .75) 100%),
-              linear-gradient(180deg, rgba(5, 7, 13, .25) 0%, transparent 30%, rgba(5, 7, 13, .7) 100%); }
+              linear-gradient(180deg, rgba(5, 7, 13, .25) 0%, transparent 30%, rgba(5, 7, 13, .6) 100%); }
+body.bg-paused #bg > div { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { #bg > div { animation: none; } }
 
 /* ---- Barre du haut ---- */
 #top { position: fixed; top: 2.3rem; left: 4rem; right: 4rem; height: 3.2rem; z-index: 5;
@@ -59,7 +85,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 .1rem .4rem rgba(0, 0, 0, .5); }
 .tile .badge { position: absolute; top: .8rem; left: .8rem; display: inline-flex; align-items: center; gap: .4rem;
   padding: .28rem .6rem; border-radius: 999px; font-size: .68rem; font-weight: 700; letter-spacing: .03em;
-  background: rgba(0, 0, 0, .45); backdrop-filter: blur(.4rem); }
+  background: rgba(0, 0, 0, .55); }
 .tile .badge i { width: .45rem; height: .45rem; border-radius: 50%; background: var(--ok); animation: pulse 1.6s infinite; }
 .tile .dot { position: absolute; top: .9rem; right: .9rem; width: .65rem; height: .65rem; border-radius: 50%;
   background: var(--text-3); box-shadow: 0 0 0 .18rem rgba(0, 0, 0, .3); }
@@ -127,7 +153,7 @@
 
 /* ---- Calques (réglages, dialogues, clavier, assistant) ---- */
 #layers > .layer { position: fixed; inset: 0; z-index: 20; animation: fadeIn .2s var(--ease); }
-.scrim { position: absolute; inset: 0; background: rgba(3, 5, 10, .72); backdrop-filter: blur(1.4rem) saturate(1.2); }
+.scrim { position: absolute; inset: 0; background: rgba(3, 5, 10, .82); }
 .sheet { position: absolute; background: var(--panel); box-shadow: 0 2rem 5rem rgba(0, 0, 0, .6), inset 0 0 0 1px var(--line);
   border-radius: 1.6rem; animation: rise .32s var(--ease-out); }
 .dialog { left: 50%; top: 50%; width: 38rem; transform: translate(-50%, -50%); padding: 2.2rem 2.4rem 2rem; animation: none; }

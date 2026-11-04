@@ -18,7 +18,7 @@ const SYS_BUTTONS = [
 const A = {
   st: { tiles: [], apps: { running: [] }, pads: [], bt: {}, net: {}, moonlight: [], library: { systems: [], recent: [] },
     settings: {}, presets: [], sleep: {} },
-  zone: 'row', ti: 0, si: 0, yi: 0, shelfMemo: {}, shelfItems: [], layers: [], moving: null, bgFlip: false,
+  zone: 'row', ti: 0, si: 0, yi: 0, shelfMemo: {}, shelfItems: [], layers: [], moving: null,
   sig: {},
 };
 
@@ -155,28 +155,7 @@ function renderCaption() {
   const [title, sub] = captionFor(t);
   $('#capTitle').innerHTML = title;
   $('#capSub').innerHTML = sub;
-  const [c1, c2] = tileColors(t);
-  setBackdrop(c1, c2);
-  document.documentElement.style.setProperty('--accent', c1.startsWith('#') ? c1 : '#7c5cff');
-  document.documentElement.style.setProperty('--accent-2', c2.startsWith('#') ? c2 : '#2b6cff');
-}
-
-function setBackdrop(c1, c2, art) {
-  const key = c1 + c2;
-  if (A.bgKey === key) return;
-  A.bgKey = key;
-  const next = A.bgFlip ? $('#bgA') : $('#bgB'), prev = A.bgFlip ? $('#bgB') : $('#bgA');
-  A.bgFlip = !A.bgFlip;
-  const a = c1.startsWith('#') ? rgba(c1, .55) : c1, b = c2.startsWith('#') ? rgba(c2, .42) : c2;
-  next.style.background = `radial-gradient(60% 55% at 15% 8%, ${a}, transparent 62%),
-    radial-gradient(55% 50% at 88% 22%, ${b}, transparent 66%),
-    radial-gradient(80% 60% at 50% 115%, ${c2.startsWith('#') ? rgba(c2, .22) : 'transparent'}, transparent 70%), #05070d`;
-  next.classList.add('on'); prev.classList.remove('on');
-}
-function setArt(path) {
-  const el = $('#bgArt');
-  if (path) { el.style.backgroundImage = `url("${fileUrl(path)}")`; el.classList.add('on'); }
-  else el.classList.remove('on');
+  // Le fond ne suit plus la tuile sélectionnée : c'est une animation d'ambiance continue (home.css).
 }
 
 /* ---- Étagère contextuelle ---- */
@@ -286,8 +265,6 @@ function markShelf() {
     if (right > view) shift = right - view + rem;
   }
   $('#shelfTrack').style.transform = `translateX(${-shift}px)`;
-  const item = A.shelfItems[A.si];
-  setArt(A.zone === 'shelf' && item ? item.art : null);
   $('#main').classList.toggle('in-shelf', A.zone === 'shelf');
   $('#main').classList.toggle('in-sys', A.zone === 'sys');
 }
@@ -853,7 +830,11 @@ Shell.on('state', partial => {
   if (partial && partial.pads && partial.pads.length) Pad.kind = partial.pads[0].kind === 'playstation' ? 'playstation' : 'xbox';
   scheduleRender(partial || {});
 });
-Shell.on('shown', () => { renderAll(); });
+// Fond animé en pause quand l'accueil est caché (appli ou jeu au premier plan) : rien ne tourne pour rien.
+const pauseBg = paused => document.body.classList.toggle('bg-paused', paused);
+Shell.on('shown', () => { pauseBg(false); renderAll(); });
+Shell.on('hidden', () => pauseBg(true));
+document.addEventListener('visibilitychange', () => pauseBg(document.hidden));
 Shell.on('power-menu', () => powerMenu());
 Shell.on('pairing', ev => { A.layers.forEach(l => l instanceof PairingLayer && l.state(ev)); });
 Shell.on('wake-test', r => wakeTestResult(r));

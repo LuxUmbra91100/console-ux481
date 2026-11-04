@@ -226,6 +226,8 @@ class Shell:
         self.update_mapper()
         if focus == "home":
             self.home.surface.emit("shown")
+        elif focus == "app":
+            self.home.surface.emit("hidden")      # met en pause le fond animé de l'accueil
 
     def update_mapper(self):
         mode = None
