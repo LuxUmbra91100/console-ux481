@@ -57,6 +57,7 @@ DEFAULTS = {
     "ambient_min": 5,                           # mode ambiance après N min sans activité (0 = jamais)
     "covers_auto": True,                        # jaquettes manquantes téléchargées (base libretro)
     "resume_games": True,                       # parties mises de côté en quittant, reprises au lancement
+    "usb_import": True,                         # proposer d'importer les jeux d'une clé USB branchée
 }
 
 

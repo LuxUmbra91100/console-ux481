@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Ajouter des jeux</title>
+<style>
+  :root { --bg: #0b0f1a; --panel: #141a2b; --line: rgba(255, 255, 255, .09); --text: #eef1f7; --text-2: #9aa3b8;
+    --accent: #7c5cff; --ok: #22c55e; --warn: #f59e0b; --bad: #ef4444; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; min-height: 100vh; color: var(--text); background: var(--bg);
+    background-image: radial-gradient(110% 70% at 50% -15%, #241b5c 0%, rgba(11, 15, 26, 0) 70%);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px 48px; }
+  header { display: flex; align-items: center; gap: 12px; margin: 4px 0 20px; }
+  .logo { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 800;
+    font-size: 1.2rem; background: linear-gradient(135deg, var(--accent), #2b6cff); box-shadow: 0 0 0 2px rgba(255, 255, 255, .2); }
+  h1 { margin: 0; font-size: 1.3rem; line-height: 1.2; }
+  .sub { color: var(--text-2); font-size: .9rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+  .drop { border: 2px dashed rgba(255, 255, 255, .2); border-radius: 20px; padding: 34px 18px; text-align: center;
+    background: rgba(255, 255, 255, .03); transition: border-color .15s, background .15s; }
+  .drop.over { border-color: var(--accent); background: rgba(124, 92, 255, .14); }
+  .drop .big { font-size: 1.15rem; font-weight: 700; }
+  .drop .icon { font-size: 2.2rem; line-height: 1; margin-bottom: 10px; }
+  .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+  button { appearance: none; border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 650;
+    color: #fff; background: var(--accent); cursor: pointer; }
+  button.ghost { background: rgba(255, 255, 255, .09); }
+  button:disabled { opacity: .5; }
+  .hint { color: var(--text-2); font-size: .85rem; margin-top: 16px; }
+  .hint b { color: var(--text); font-weight: 600; }
+  .codebox { text-align: center; }
+  .codebox input { width: 100%; max-width: 280px; margin: 14px auto; display: block; text-align: center; font: inherit;
+    font-size: 2rem; letter-spacing: .35em; padding: 10px 0 10px .35em; border-radius: 14px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, .06); color: var(--text); }
+  .err { color: #fca5a5; font-size: .9rem; min-height: 1.3em; }
+  .total { margin: 22px 0 8px; display: flex; justify-content: space-between; color: var(--text-2); font-size: .9rem; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .row { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 11px 14px; }
+  .row .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { flex: none; color: var(--text-2); font-size: .85rem; }
+  .bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .08); margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  .row.done .bar i { background: var(--ok); }
+  .row.fail .bar i { background: var(--bad); }
+  .row .note { color: var(--text-2); font-size: .85rem; margin-top: 4px; }
+  .badge { display: inline-block; vertical-align: 1px; font-size: .72rem; font-weight: 750; padding: 2px 8px;
+    border-radius: 999px; margin-right: 8px; background: rgba(255, 255, 255, .1); color: var(--text); }
+  .badge.ok { background: rgba(34, 197, 94, .18); color: #86efac; }
+  .badge.bios { background: rgba(124, 92, 255, .22); color: #c4b5fd; }
+  .badge.warn { background: rgba(245, 158, 11, .18); color: #fcd34d; }
+  .badge.bad { background: rgba(239, 68, 68, .2); color: #fca5a5; }
+  .results h2 { font-size: 1rem; margin: 24px 0 8px; }
+  .hidden { display: none !important; }
+  footer { margin-top: 28px; color: var(--text-2); font-size: .8rem; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo" id="logo">✦</div>
+    <div><h1 id="title">Ajouter des jeux</h1><div class="sub" id="subtitle">Connexion à la console…</div></div>
+  </header>
+
+  <section class="card codebox hidden" id="login">
+    <div class="big"><b>Tape le code affiché sur la TV</b></div>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" placeholder="······">
+    <div class="err" id="loginErr"></div>
+    <button id="loginBtn">Valider</button>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="drop" id="drop">
+      <div class="icon">🎮</div>
+      <div class="big">Glisse ici tes jeux et tes BIOS</div>
+      <div class="sub">en vrac : la console range tout au bon endroit</div>
+      <div class="btns">
+        <button id="pickFiles">Choisir des fichiers</button>
+        <button id="pickDir" class="ghost">Choisir un dossier</button>
+      </div>
+      <input type="file" id="files" multiple class="hidden">
+      <input type="file" id="dir" webkitdirectory multiple class="hidden">
+    </div>
+    <p class="hint">GBA, DS, 3DS, GameCube, Wii, PS1, PS2 · <b>.zip</b> et <b>.7z</b> décompressés tout seuls ·
+      <b>.cue</b> avec leurs <b>.bin</b>, jeux sur plusieurs disques regroupés · BIOS reconnus quel que soit leur nom.</p>
+    <div class="total hidden" id="total"><span id="totalText"></span><span id="totalPct"></span></div>
+    <div class="list" id="list"></div>
+    <div class="results" id="results"></div>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const SYS = { gba: 'GBA', nds: 'DS', n3ds: '3DS', gc: 'GameCube', wii: 'Wii', psx: 'PS1', ps2: 'PS2' };
+const IGNORE = /^(\.|_\.|thumbs\.db$|desktop\.ini$)/i;
+let token = new URLSearchParams(location.search).get('k') || sessionStorage.getItem('k') || '';
+if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/');
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const size = n => n >= 1e9 ? (n / 1e9).toFixed(1).replace('.', ',') + ' Go' : n >= 1e6 ? Math.round(n / 1e6) + ' Mo' : Math.max(1, Math.round(n / 1e3)) + ' Ko';
+
+async function start() {
+  if (!token) return showLogin();
+  const r = await fetch('/api/info', { headers: { 'X-Token': token } }).catch(() => null);
+  if (!r || !r.ok) { token = ''; sessionStorage.removeItem('k'); return showLogin(r ? (await r.json()).error : 'Console injoignable'); }
+  sessionStorage.setItem('k', token);
+  const d = await r.json();
+  $('#title').textContent = `Ajouter à ${d.name}`;
+  $('#logo').textContent = (d.name || 'C').slice(0, 1).toUpperCase();
+  $('#subtitle').textContent = `${size(d.free)} libres sur la console`;
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+}
+function showLogin(msg) {
+  $('#subtitle').textContent = 'Le code est sur l\'écran « Ajouter des jeux » de la TV';
+  $('#login').classList.remove('hidden'); $('#app').classList.add('hidden');
+  $('#loginErr').textContent = msg || '';
+  $('#code').focus();
+}
+async function login() {
+  const code = $('#code').value.replace(/\D/g, '');
+  if (code.length !== 6) { $('#loginErr').textContent = 'Le code a 6 chiffres'; return; }
+  $('#loginBtn').disabled = true;
+  const r = await fetch('/api/auth?code=' + code).catch(() => null);
+  $('#loginBtn').disabled = false;
+  if (!r) { $('#loginErr').textContent = 'Console injoignable'; return; }
+  const d = await r.json();
+  if (!r.ok) { $('#loginErr').textContent = d.error; return; }
+  token = d.token; start();
+}
+$('#loginBtn').onclick = login;
+$('#code').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+/* ---------- fichiers : sélection, glisser-déposer (dossiers compris) ---------- */
+function readAll(reader) {
+  return new Promise(resolve => {
+    const out = [];
+    const more = () => reader.readEntries(list => { if (!list.length) return resolve(out); out.push(...list); more(); }, () => resolve(out));
+    more();
+  });
+}
+async function walk(entry, out) {
+  if (entry.isFile) {
+    await new Promise(res => entry.file(f => { out.push({ file: f, path: entry.fullPath.replace(/^\//, '') }); res(); }, res));
+  } else if (entry.isDirectory) {
+    for (const child of await readAll(entry.createReader())) await walk(child, out);
+  }
+}
+async function fromDrop(dt) {
+  const out = [], entries = [...dt.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!entries.length) return [...dt.files].map(f => ({ file: f, path: f.name }));
+  for (const e of entries) await walk(e, out);
+  return out;
+}
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', async e => add(await fromDrop(e.dataTransfer)));
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => e.preventDefault());
+$('#pickFiles').onclick = () => $('#files').click();
+$('#pickDir').onclick = () => $('#dir').click();
+if (!('webkitdirectory' in document.createElement('input')) || /iPhone|iPad|Android/i.test(navigator.userAgent)) $('#pickDir').classList.add('hidden');
+$('#files').onchange = e => { add([...e.target.files].map(f => ({ file: f, path: f.name }))); e.target.value = ''; };
+$('#dir').onchange = e => { add([...e.target.files].map(f => ({ file: f, path: f.webkitRelativePath || f.name }))); e.target.value = ''; };
+
+/* ---------- envoi : un fichier après l'autre, puis rangement ---------- */
+const queue = [];
+let busy = false, sent = 0, total = 0;
+function add(items) {
+  items = items.filter(it => !it.path.split('/').some(p => IGNORE.test(p)));
+  if (!items.length) return;
+  queue.push(items);
+  total += items.reduce((n, it) => n + it.file.size, 0);
+  if (!busy) run();
+}
+function row(it) {
+  const el = document.createElement('div');
+  el.className = 'row';
+  el.innerHTML = `<div class="top"><span class="name">${esc(it.path)}</span><span class="meta">${size(it.file.size)}</span></div><div class="bar"><i></i></div><div class="note hidden"></div>`;
+  $('#list').prepend(el);
+  return el;
+}
+function overall() {
+  $('#total').classList.remove('hidden');
+  $('#totalText').textContent = `${size(sent)} sur ${size(total)}`;
+  $('#totalPct').textContent = total ? Math.floor(sent * 100 / total) + ' %' : '';
+}
+function put(it, batch, el) {
+  return new Promise(resolve => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', `/api/upload?batch=${batch}&path=${encodeURIComponent(it.path)}`);
+    x.setRequestHeader('X-Token', token);
+    let last = 0;
+    x.upload.onprogress = e => { if (!e.lengthComputable) return; sent += e.loaded - last; last = e.loaded; el.querySelector('i').style.width = (e.loaded * 100 / e.total) + '%'; overall(); };
+    x.onload = () => {
+      sent += it.file.size - last; overall();
+      if (x.status === 200) { el.classList.add('done'); el.querySelector('i').style.width = '100%'; return resolve(true); }
+      let msg = 'refusé'; try { msg = JSON.parse(x.responseText).error; } catch (_) { /* rien */ }
+      fail(el, msg); resolve(x.status === 403 || x.status === 503 ? 'stop' : false);
+    };
+    x.onerror = () => { fail(el, 'Connexion perdue avec la console'); resolve('stop'); };
+    x.send(it.file);
+  });
+}
+function fail(el, msg) { el.classList.add('fail'); const n = el.querySelector('.note'); n.textContent = msg; n.classList.remove('hidden'); }
+async function run() {
+  busy = true;
+  while (queue.length) {
+    const items = queue.shift();
+    const batch = (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)).slice(0, 24);
+    let stop = false;
+    for (const it of items) {
+      if (stop) break;
+      const res = await put(it, batch, row(it));
+      if (res === 'stop') stop = true;
+    }
+    $('#subtitle').textContent = 'Rangement sur la console…';
+    const r = await fetch(`/api/done?batch=${batch}`, { method: 'POST', headers: { 'X-Token': token } }).catch(() => null);
+    const d = r ? await r.json().catch(() => ({})) : {};
+    show(d.results || []);
+    const info = await fetch('/api/info', { headers: { 'X-Token': token } }).then(x => x.json()).catch(() => null);
+    $('#subtitle').textContent = info && info.free ? `${size(info.free)} libres sur la console` : '';
+    if (stop) break;
+  }
+  busy = false;
+}
+function show(results) {
+  const box = document.createElement('div');
+  const line = (badge, cls, label, note) => `<div class="row"><div class="top"><span class="name"><span class="badge ${cls}">${esc(badge)}</span>${esc(label)}</span></div>${note ? `<div class="note">${esc(note)}</div>` : ''}</div>`;
+  const added = results.filter(r => r.status === 'added' && r.kind === 'game');
+  const bios = results.filter(r => r.kind === 'bios' && (r.status === 'added' || r.status === 'present'));
+  const present = results.filter(r => r.status === 'present' && r.kind === 'game');
+  const sort = results.filter(r => r.kind === 'to_sort' && r.status === 'added');
+  const bad = results.filter(r => r.status === 'error' || r.kind === 'unsupported');
+  const ignored = results.filter(r => r.kind === 'ignored').length;
+  let html = '';
+  if (added.length) html += `<h2>✓ ${added.length} jeu${added.length > 1 ? 'x' : ''} ajouté${added.length > 1 ? 's' : ''}</h2>` + added.map(r => line(SYS[r.system] || r.system, 'ok', r.label)).join('');
+  if (bios.length) html += '<h2>BIOS</h2>' + bios.map(r => line('BIOS', 'bios', r.label, r.status === 'present' ? 'déjà sur la console' : '')).join('');
+  if (present.length) html += '<h2>Déjà sur la console</h2>' + present.map(r => line(SYS[r.system] || r.system, '', r.label)).join('');
+  if (sort.length) html += '<h2>Pas reconnus</h2>' + sort.map(r => line('À trier', 'warn', r.label, 'gardé dans le dossier « _À trier » du partage Jeux')).join('');
+  if (bad.length) html += '<h2>Problèmes</h2>' + bad.map(r => line('!', 'bad', r.label, r.note)).join('');
+  if (ignored) html += `<p class="hint">${ignored} fichier${ignored > 1 ? 's' : ''} sans rapport ignoré${ignored > 1 ? 's' : ''} (textes, images…).</p>`;
+  if (!html) html = '<p class="hint">Rien à ranger.</p>';
+  box.innerHTML = html;
+  $('#results').prepend(box);
+  $('#list').innerHTML = '';
+  sent = total = 0;
+  $('#total').classList.add('hidden');
+}
+start();
+</script>
+</body>
+</html>

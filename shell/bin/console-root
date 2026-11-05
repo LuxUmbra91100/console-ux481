@@ -75,6 +75,59 @@ health() {
   printf '{"device": "%s", "smart": %s, "kernel_io_errors": %d}\n' "$dev" "$smart" "${io:-0}"
 }
 
+# Clé USB : montage en lecture seule pour importer jeux et BIOS. Seulement une partition d'un
+# disque USB (ou débranchable à chaud), jamais le disque système ; options nosuid/nodev/noexec.
+usb_check() {
+  local part=$1 disk tran hot
+  [[ $part =~ ^sd[a-z]{1,2}[0-9]{0,2}$ ]] || { echo "partition invalide" >&2; exit 2; }
+  [[ -b /dev/$part ]] || { echo "partition absente" >&2; exit 3; }
+  disk=$(lsblk -ndo PKNAME "/dev/$part" 2>/dev/null | head -n1)
+  [[ -n $disk ]] || disk=$part
+  tran=$(lsblk -ndo TRAN "/dev/$disk" 2>/dev/null | tr -d ' ')
+  hot=$(lsblk -ndo HOTPLUG "/dev/$disk" 2>/dev/null | tr -d ' ')
+  [[ $tran == usb || $hot == 1 ]] || { echo "pas un disque USB" >&2; exit 3; }
+}
+
+usb_mount() {
+  local part=${1:-} fstype uid gid opts mp
+  usb_check "$part"
+  mp=$(findmnt -rno TARGET "/dev/$part" 2>/dev/null | head -n1)
+  if [[ -n $mp ]]; then echo "$mp"; return 0; fi        # déjà montée ailleurs : on la lit là
+  fstype=$(blkid -o value -s TYPE "/dev/$part" 2>/dev/null)
+  uid=$(id -u "${SUDO_USER:-}" 2>/dev/null || echo 1000)
+  gid=$(id -g "${SUDO_USER:-}" 2>/dev/null || echo 1000)
+  opts="ro,nosuid,nodev,noexec"
+  case $fstype in
+    vfat|exfat) opts+=",uid=$uid,gid=$gid,fmask=0133,dmask=0022,iocharset=utf8" ;;
+    ntfs) fstype=ntfs3; opts+=",uid=$uid,gid=$gid,iocharset=utf8" ;;
+    hfsplus) opts+=",uid=$uid,gid=$gid" ;;
+    ext2|ext3|ext4|btrfs|iso9660|udf) ;;
+    *) echo "système de fichiers non pris en charge : ${fstype:-inconnu}" >&2; exit 3 ;;
+  esac
+  mp=/media/console-usb/$part
+  mkdir -p "$mp"
+  if ! mount -t "$fstype" -o "$opts" "/dev/$part" "$mp" 2>/dev/null; then
+    if [[ $fstype == ntfs3 ]] && command -v ntfs-3g >/dev/null \
+       && ntfs-3g -o "ro,nosuid,nodev,noexec,uid=$uid,gid=$gid" "/dev/$part" "$mp" 2>/dev/null; then
+      :
+    else
+      rmdir "$mp" 2>/dev/null; echo "montage impossible" >&2; exit 4
+    fi
+  fi
+  echo "$mp"
+}
+
+usb_unmount() {
+  local part=${1:-} mp
+  [[ $part =~ ^sd[a-z]{1,2}[0-9]{0,2}$ ]] || { echo "partition invalide" >&2; exit 2; }
+  mp=/media/console-usb/$part
+  if mountpoint -q "$mp" 2>/dev/null; then
+    umount "$mp" 2>/dev/null || umount -l "$mp" 2>/dev/null   # clé déjà retirée : démontage différé
+  fi
+  rmdir "$mp" 2>/dev/null
+  return 0
+}
+
 cmd=${1:-}
 shift || true
 case "$cmd" in
@@ -84,7 +137,9 @@ case "$cmd" in
   rtc-alarm) rtc_alarm "$@" ;;
   mem-sleep) mem_sleep "$@" ;;
   health) health ;;
-  *) echo "usage : console-root hw-init|post-resume|pre-sleep|screenpad-off|rtc-alarm N|clear|mem-sleep s2idle|deep|health" >&2
+  usb-mount) usb_mount "$@" ;;
+  usb-unmount) usb_unmount "$@" ;;
+  *) echo "usage : console-root hw-init|post-resume|pre-sleep|screenpad-off|rtc-alarm N|clear|mem-sleep s2idle|deep|health|usb-mount sdX1|usb-unmount sdX1" >&2
      exit 2 ;;
 esac
 exit 0

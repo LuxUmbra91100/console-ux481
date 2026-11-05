@@ -187,6 +187,18 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue(cmd[0].endswith("/bin/console-emu"))                 # reprise des parties
         self.assertEqual(cmd[1:], ["dolphin", "-b", "-e", rec[0]["path"]])
 
+    def test_directory_shown_as_one_game(self):
+        """« Jeu.m3u/ » contenant « Jeu.m3u » et ses disques : un seul jeu, comme dans ES-DE."""
+        from consoleshell import covers
+        d = os.path.join(TMP_HOME, "ROMs", "wii", "Xenoblade.m3u")
+        os.makedirs(d, exist_ok=True)
+        for f in ("Xenoblade.m3u", "Xenoblade (Disc 1).rvz", "Xenoblade (Disc 2).rvz"):
+            open(os.path.join(d, f), "w").close()
+        self.assertEqual(library.count_games("wii"), 1)
+        self.assertEqual(covers.games("wii"), [d])
+        self.assertTrue(covers.media_path("wii", d, "covers").endswith(os.path.join("wii", "covers", "Xenoblade.m3u.png")))
+        self.assertEqual(library.command("wii", d)[-1], os.path.join(d, "Xenoblade.m3u"))
+
     def test_set_startup(self):
         library.set_startup("ps2")
         with open(library.SETTINGS_XML, encoding="utf-8") as f:
@@ -808,6 +820,220 @@ class ResumeTests(unittest.TestCase):
         state = os.path.join(state_dir, "SLES-1 (0000ABCD).resume.p2s")
         self.assertEqual(calls[0], f"run net.pcsx2.PCSX2 -batch -- {self.rom}")
         self.assertEqual(calls[1], f"run net.pcsx2.PCSX2 -statefile {state} -batch -- {self.rom}")
+
+
+def _iso9660(boot_line, sector=2048, offset=0, system_id=b"PLAYSTATION"):
+    """Image ISO 9660 minimale : descripteur (secteur 16), racine (20), SYSTEM.CNF (21)."""
+    def user(data):
+        data = data.ljust(2048, b"\x00")
+        if sector == 2048:
+            return data
+        return (b"\x00" * offset + data).ljust(sector, b"\x00")
+    pvd = bytearray(2048)
+    pvd[0] = 1
+    pvd[1:6] = b"CD001"
+    pvd[8:8 + len(system_id)] = system_id
+    root = bytearray(34)
+    root[0] = 34
+    root[2:6] = (20).to_bytes(4, "little")
+    root[10:14] = (2048).to_bytes(4, "little")
+    pvd[156:190] = root
+    cnf = boot_line.encode() + b"\r\nVER = 1.00\r\n"
+    name = b"SYSTEM.CNF;1"
+    rec = bytearray(33 + len(name) + (1 - len(name) % 2))
+    rec[0] = len(rec)
+    rec[2:6] = (21).to_bytes(4, "little")
+    rec[10:14] = len(cnf).to_bytes(4, "little")
+    rec[32] = len(name)
+    rec[33:33 + len(name)] = name
+    sectors = [user(b"")] * 16 + [user(bytes(pvd))] + [user(b"")] * 3 + [user(bytes(rec))] + [user(cnf)]
+    return b"".join(sectors)
+
+
+class ImporterTests(unittest.TestCase):
+    """Ajout de jeux et de BIOS : reconnaissance par le contenu, regroupements, rangement."""
+
+    def setUp(self):
+        from consoleshell import importer
+        self.imp = importer
+        self.root = tempfile.mkdtemp(prefix="import-")
+        lib = tempfile.mkdtemp(prefix="bibliotheque-")
+        self.roms, self.bios = os.path.join(lib, "ROMs"), os.path.join(lib, "BIOS")
+        patches = {"ROMS_DIR": self.roms, "BIOS_DIR": self.bios, "TO_SORT": os.path.join(self.roms, "_À trier"),
+                   "WORK_DIR": os.path.join(lib, "work")}
+        for k, v in patches.items():
+            old = getattr(importer, k)
+            setattr(importer, k, v)
+            self.addCleanup(setattr, importer, k, old)
+
+    def put(self, rel, data=b"x" * 2000):
+        path = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    def test_disc_systems_by_content(self):
+        imp = self.imp
+        gc = bytearray(0x40); gc[0x1c:0x20] = b"\xc2\x33\x9f\x3d"
+        wii = bytearray(0x40); wii[0x18:0x1c] = b"\x5d\x1c\x9e\xa3"
+        rvz = bytearray(0x60); rvz[:4] = b"RVZ\x01"; rvz[0x48:0x4c] = (2).to_bytes(4, "big")
+        gcz = b"\x01\xc0\x0b\xb1" + (0).to_bytes(4, "little") + b"\x00" * 40
+        cases = {
+            "a/Metroid Prime.iso": (bytes(gc), "gc"), "a/Mario Galaxy.iso": (bytes(wii), "wii"),
+            "a/Zelda.rvz": (bytes(rvz), "wii"), "a/Pikmin.gcz": (gcz, "gc"), "a/Wii Sports.wbfs": (b"WBFS" + b"\0" * 60, "wii"),
+            "a/Okami.iso": (_iso9660("BOOT2 = cdrom0:\\SLES_544.39;1"), "ps2"),
+            "a/Spyro.bin": (_iso9660("BOOT = cdrom:\\SCES_009.00;1", 2352, 24), "psx"),
+            "a/Golden Sun.gba": (b"\0" * 200, "gba"), "a/Bizarre.iso": (b"\x42" * 70000, None),
+        }
+        for rel, (data, system) in cases.items():
+            self.assertEqual(imp.disc_system(self.put(rel, data)), system, rel)
+        head = bytearray(124); head[:8] = b"MComprHD"; head[12:16] = (5).to_bytes(4, "big")
+        head[48:56] = (124).to_bytes(8, "big")
+        dvd = bytes(head) + b"DVD \x01\x00\x00\x10" + b"\0" * 8
+        cd = bytes(head) + b"CHT2\x01\x00\x00\x10" + b"\0" * 8
+        self.assertEqual(imp.disc_system(self.put("a/God of War.chd", dvd)), "ps2")
+        self.assertEqual(imp.disc_system(self.put("a/Crash.chd", cd)), "psx")
+
+    def test_bios_recognized_whatever_their_name(self):
+        imp = self.imp
+        ps1 = self.put("BIOS/Ma bios PS1 europe.BIN", bytes(range(256)) * 2048)          # 512 Kio
+        data = bytearray(4 << 20)
+        entries = [(b"RESET", 0x100), (b"ROMDIR", 0x80), (b"EXTINFO", 0x40), (b"ROMVER", 0x10)]
+        for i, (name, size) in enumerate(entries):
+            e = 0x100 + 16 * i
+            data[e:e + 10] = name.ljust(10, b"\0")
+            data[e + 12:e + 16] = size.to_bytes(4, "little")
+        data[0x1c0:0x1c0 + 14] = b"0230EC20080220"
+        ps2 = self.put("BIOS/SCPH-90004.bin", bytes(data))
+        from unittest import mock
+        with mock.patch.dict(imp.BIOS_MD5, {imp.md5(ps1): ("psx", "scph5502.bin", "PS1 Europe")}):
+            items = {it.label: it for it in imp.plan(self.root)}
+            self.assertEqual(items["PS1 Europe"].dest, os.path.join(self.bios, "scph5502.bin"))
+            self.assertEqual(items["PS2 Europe v2.30"].dest, os.path.join(self.bios, "SCPH-90004.bin"))
+            imp.execute(list(items.values()))
+            os.makedirs(os.path.join(self.roms, "psx"))
+            for n in ("Spyro (Europe).chd", "Crash (USA).chd"):
+                open(os.path.join(self.roms, "psx", n), "w").close()
+            st = imp.bios_status()
+        self.assertEqual(st["psx"]["have"], {"eu": "scph5502.bin"})
+        self.assertEqual(st["psx"]["missing"], ["us"])                      # un jeu américain sans son BIOS
+        self.assertEqual(st["ps2"]["have"][0]["zone"], "Europe")
+        self.assertEqual(st["ps2"]["have"][0]["date"], "20/02/2008")
+        self.assertTrue(os.path.exists(ps1))                                # copie : la source reste
+
+    def test_cue_bin_and_multi_disc_become_single_entries(self):
+        imp = self.imp
+        track = _iso9660("BOOT = cdrom:\\SCES_123.45;1", 2352, 24)
+        self.put("Vrac/Tomba (Europe)/Tomba (Europe) (Track 1).bin", track)
+        self.put("Vrac/Tomba (Europe)/Tomba (Europe) (Track 2).bin", b"\0" * 5000)
+        self.put("Vrac/Tomba (Europe)/Tomba (Europe).cue",
+                 b'FILE "Tomba (Europe) (Track 1).bin" BINARY\n  TRACK 01 MODE2/2352\n'
+                 b'FILE "Tomba (Europe) (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n')
+        head = bytearray(124); head[:8] = b"MComprHD"; head[12:16] = (5).to_bytes(4, "big")
+        head[48:56] = (124).to_bytes(8, "big")
+        cd = bytes(head) + b"CHT2\x01\x00\x00\x10" + b"\0" * 8
+        self.put("Vrac/Final Fantasy VII (France) (Disc 1).chd", cd)
+        self.put("Vrac/Final Fantasy VII (France) (Disc 2).chd", cd + b"2")
+        self.put("Vrac/Lisez-moi.txt", b"bonjour")
+        self.put("Vrac/Inconnu.iso", b"\x42" * 70000)
+        self.put("Vrac/Jeu.rar", b"Rar!")
+        results = imp.import_tree(self.root)
+        tomba = os.path.join(self.roms, "psx", "Tomba (Europe).cue")
+        self.assertTrue(os.path.isfile(os.path.join(tomba, "Tomba (Europe).cue")))
+        self.assertTrue(os.path.isfile(os.path.join(tomba, "Tomba (Europe) (Track 2).bin")))
+        ff7 = os.path.join(self.roms, "psx", "Final Fantasy VII (France).m3u")
+        with open(os.path.join(ff7, "Final Fantasy VII (France).m3u")) as f:
+            self.assertEqual(f.read().splitlines(), ["Final Fantasy VII (France) (Disc 1).chd",
+                                                     "Final Fantasy VII (France) (Disc 2).chd"])
+        self.assertTrue(os.path.isfile(os.path.join(self.roms, "_À trier", "Inconnu.iso")))
+        status = {r["label"]: r["status"] for r in results}
+        self.assertEqual(status["Lisez-moi.txt"], "new")                    # ignoré, pas copié
+        self.assertFalse(os.path.exists(os.path.join(self.roms, "_À trier", "Lisez-moi.txt")))
+        kinds = {r["label"]: r["kind"] for r in results}
+        self.assertEqual(kinds["Jeu.rar"], "unsupported")
+        # Deuxième fois : tout est déjà là, rien n'est copié en double
+        again = imp.plan(self.root)
+        self.assertTrue(all(it.status == "present" for it in again if it.kind == "game"))
+        self.assertEqual(imp.summary(again)["games"], {})
+
+    def test_archives_and_uploaded_files_are_moved(self):
+        import zipfile
+        imp = self.imp
+        z = os.path.join(self.root, "envoi", "Pack GBA.zip")
+        os.makedirs(os.path.dirname(z))
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.writestr("Golden Sun (France).gba", b"\0" * 4000)
+            zf.writestr("../../evasion.gba", b"\0" * 4000)
+            zf.writestr("infos.nfo", b"x")
+        results = imp.import_tree(os.path.join(self.root, "envoi"), move=True)
+        self.assertTrue(os.path.isfile(os.path.join(self.roms, "gba", "Golden Sun (France).gba")))
+        self.assertTrue(os.path.isfile(os.path.join(self.roms, "gba", "evasion.gba")))   # pas en dehors
+        self.assertFalse(os.path.exists(z))                                 # envoi : l'archive est rangée
+        self.assertIn("added", {r["status"] for r in results if r["kind"] == "archive"})
+
+
+class UploaderTests(unittest.TestCase):
+    """Envoi depuis un téléphone ou un PC : code, jeton, envoi, rangement, refus."""
+
+    def setUp(self):
+        from consoleshell import importer, uploader
+        self.importer, self.uploader = importer, uploader
+        lib = tempfile.mkdtemp(prefix="envoi-")
+        for k, v in {"ROMS_DIR": os.path.join(lib, "ROMs"), "BIOS_DIR": os.path.join(lib, "BIOS"),
+                     "TO_SORT": os.path.join(lib, "ROMs", "_À trier"), "WORK_DIR": os.path.join(lib, "work")}.items():
+            old = getattr(importer, k)
+            setattr(importer, k, v)
+            self.addCleanup(setattr, importer, k, old)
+        self.roms = importer.ROMS_DIR
+        old_page = uploader.PAGE
+        uploader.PAGE = os.path.join(ROOT, "shell", "ui", "upload.html")
+        self.addCleanup(setattr, uploader, "PAGE", old_page)
+        self.events = []
+        self.up = uploader.Uploader(self.events.append, name=lambda: "Nova")
+        self.port = self.up.start(port=0)
+        self.addCleanup(self.up.stop)
+
+    def call(self, method, path, body=None, token=None):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        headers = {"X-Token": token} if token else {}
+        c.request(method, path, body=body, headers=headers)
+        r = c.getresponse()
+        data = r.read()
+        c.close()
+        return r.status, (json.loads(data) if data and r.getheader("Content-Type", "").startswith("application/json") else data)
+
+    def test_code_then_upload_then_sorted(self):
+        import urllib.parse
+        st, _ = self.call("GET", "/api/auth?code=000000" if self.up.code != "000000" else "/api/auth?code=111111")
+        self.assertEqual(st, 403)
+        st, d = self.call("GET", f"/api/auth?code={self.up.code}")
+        self.assertEqual((st, d["token"]), (200, self.up.token))
+        tok = d["token"]
+        self.assertEqual(self.call("GET", "/api/info", token=tok)[1]["name"], "Nova")
+        q = urllib.parse.quote("Mes jeux/Golden Sun (France).gba")
+        self.assertEqual(self.call("PUT", f"/api/upload?batch=essai123&path={q}", b"\0" * 5000)[0], 403)  # sans jeton
+        self.assertEqual(self.call("PUT", f"/api/upload?batch=essai123&path={q}", b"\0" * 5000, tok)[0], 200)
+        bad = urllib.parse.quote("../../../etc/evil.gba")
+        self.assertEqual(self.call("PUT", f"/api/upload?batch=essai123&path={bad}", b"\0" * 10, tok)[0], 200)
+        st, d = self.call("POST", "/api/done?batch=essai123", token=tok)
+        self.assertEqual(st, 200)
+        added = sorted(r["label"] for r in d["results"] if r["status"] == "added")
+        self.assertEqual(added, ["Golden Sun (France)", "evil"])
+        self.assertTrue(os.path.isfile(os.path.join(self.roms, "gba", "Golden Sun (France).gba")))
+        self.assertTrue(os.path.isfile(os.path.join(self.roms, "gba", "evil.gba")))     # pas hors du dossier
+        self.assertFalse(os.path.exists(self.up.staging("essai123")))                    # dépôt vidé
+        types = [e["type"] for e in self.events]
+        self.assertIn("progress", types)
+        self.assertEqual(types[-1], "done")
+
+    def test_page_served_and_closed_screen_refuses(self):
+        st, page = self.call("GET", "/")
+        self.assertEqual(st, 200)
+        self.assertIn(b"Glisse ici tes jeux", page)
+        self.up.closing = True
+        self.assertEqual(self.call("PUT", "/api/upload?batch=essai456&path=a.gba", b"\0" * 10, self.up.token)[0], 503)
 
 
 if __name__ == "__main__":

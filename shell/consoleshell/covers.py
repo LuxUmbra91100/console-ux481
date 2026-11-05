@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 
 from .config import ROMS_DIR, XDG_CACHE
-from .library import MEDIA_DIR, SYSTEM_INDEX
+from .library import MEDIA_DIR, SYSTEM_INDEX, dir_as_file
 from .util import atomic_write, log, read_json, write_json
 
 SERVER = "https://thumbnails.libretro.com"
@@ -384,21 +384,28 @@ def games(system):
     except OSError:
         return out
     for e in entries:
-        if e.name.startswith("."):
+        if e.name.startswith((".", "_")):
             continue
         if e.is_file() and os.path.splitext(e.name)[1].lower() in exts:
             out.append(e.path)
+        elif e.is_dir() and dir_as_file(e.path, exts):
+            out.append(e.path)                               # « Jeu.m3u/ » : un seul jeu
         elif e.is_dir():
             try:
-                out += [os.path.join(e.path, f) for f in sorted(os.listdir(e.path))
-                        if not f.startswith(".") and os.path.splitext(f)[1].lower() in exts]
+                for f in sorted(os.listdir(e.path)):
+                    sub = os.path.join(e.path, f)
+                    if not f.startswith(".") and os.path.splitext(f)[1].lower() in exts and \
+                            (os.path.isfile(sub) or dir_as_file(sub, exts)):
+                        out.append(sub)
             except OSError:
                 pass
     return out
 
 
 def media_path(system, rom, kind, ext=".png"):
-    rel = os.path.splitext(os.path.relpath(rom, os.path.join(ROMS_DIR, system)))[0]
+    rel = os.path.relpath(rom, os.path.join(ROMS_DIR, system))
+    if not os.path.isdir(rom):                               # dossier vu comme un fichier : nom gardé entier
+        rel = os.path.splitext(rel)[0]
     return os.path.join(MEDIA_DIR, system, kind, rel + ext)
 
 

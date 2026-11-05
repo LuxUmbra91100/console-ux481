@@ -15,8 +15,9 @@ pilotée uniquement à la **manette Xbox**, réveillée en allumant la manette.
 - **PC distant** (Tailscale) : réveil par un relais toujours allumé (Raspberry…), Sunshine
   relancé tout seul quand il se bloque, veille / redémarrage / arrêt du PC depuis la console.
 - **Émulation** GBA, DS, 3DS, GameCube, Wii, PS1, PS2 via **ES-DE** et des émulateurs
-  préréglés pour la manette et la TV. **Jaquettes ajoutées toutes seules** (base libre de
-  libretro, sans compte) et **reprise des parties là où tu t'étais arrêté**.
+  préréglés pour la manette et la TV. **Ajout des jeux et BIOS en vrac** depuis le téléphone
+  (QR code) ou une clé USB, rangés automatiquement ; **jaquettes ajoutées toutes seules** et
+  **reprise des parties là où tu t'étais arrêté**.
 - **Brave à la manette** : stick gauche = pointeur, clavier virtuel qui s'ouvre tout seul
   dans les champs de texte, épinglage de n'importe quelle page sur l'accueil, mode « TV ».
 - **Bouton Xbox = menu de la console** partout : reprendre, sauvegarder/charger l'état du
@@ -278,9 +279,33 @@ sont pas enregistrés. `console-pc-setup test` vérifie le tout.
 
 ## 7. Émulation
 
-Copie tes sauvegardes de jeux depuis ton PC sur le partage réseau :
-- Windows : `\\console\Jeux` (utilisateur : ton nom d'utilisateur Linux, mot de passe choisi à l'installation).
-- Mac / Linux : `smb://console.local/Jeux`.
+### Ajouter des jeux et des BIOS
+
+Pas besoin de savoir où ranger quoi : donne tout **en vrac** (jeux, BIOS, archives `.zip` ou
+`.7z`, dossiers entiers), la console reconnaît chaque fichier et le range au bon endroit.
+
+- **Depuis ton téléphone ou ton PC** : tuile *Jeux* › *Ajouter des jeux* (ou *Réglages ›
+  Jeux*). Un QR code s'affiche : scanne-le avec l'appareil photo du téléphone (même Wi-Fi), puis
+  choisis tes fichiers. Sur un ordinateur, ouvre l'adresse affichée et tape le code à 6
+  chiffres ; glisse-dépose des fichiers ou des dossiers entiers. Ça marche aussi depuis ton PC
+  distant, avec l'adresse Tailscale affichée. La TV montre l'arrivée de chaque fichier.
+  L'envoi n'est possible que tant que cet écran est ouvert sur la TV.
+- **Depuis une clé USB ou un disque** : branche-le, la TV annonce par exemple « 22 jeux et 2
+  BIOS trouvés » ; Ⓐ *Importer* copie tout avec une barre de progression (Ⓑ pour la masquer, Ⓧ
+  pour arrêter), puis « Tu peux retirer la clé ». La clé est lue sans jamais être modifiée ;
+  ce qui n'est pas reconnu y reste. Si tu la branches pendant un jeu, la proposition attend
+  ton retour à l'accueil.
+- **Depuis le partage réseau**, comme avant : `\\console\Jeux` sous Windows ou
+  `smb://console.local/Jeux` sur Mac/Linux (ton nom d'utilisateur Linux, mot de passe choisi à
+  l'installation). Là, c'est à toi de ranger, un dossier par console (tableau ci-dessous), et
+  les BIOS dans `\\console\BIOS`.
+
+Comment la console s'y retrouve : par l'extension quand elle suffit, sinon par le contenu
+du fichier (un `.iso` peut être GameCube, Wii, PS1 ou PS2, un `.chd` PS1 ou PS2…). Un `.cue`
+et ses pistes `.bin`, ou un jeu sur plusieurs disques, deviennent **un seul jeu** dans ES-DE
+(un `.m3u` est créé pour changer de disque depuis l'émulateur). Ce qui ressemble à un jeu sans
+être reconnu est mis de côté dans le dossier `_À trier` du partage ; les fichiers sans
+rapport (textes, images…) sont ignorés. Un jeu déjà présent n'est pas copié deux fois.
 
 | Dossier | Console | Formats conseillés | Émulateur |
 |---|---|---|---|
@@ -292,13 +317,18 @@ Copie tes sauvegardes de jeux depuis ton PC sur le partage réseau :
 | `psx` | PlayStation | `.chd`, `.cue`+`.bin`, `.m3u` | RetroArch (Beetle PSX HW) |
 | `ps2` | PlayStation 2 | `.chd`, `.iso` | PCSX2 |
 
-**BIOS** (extraits de tes consoles), tous dans `\\console\BIOS` :
+**BIOS** (extraits de tes consoles). Envoyés par le QR code ou une clé USB, ils sont reconnus
+à leur contenu et renommés comme l'émulateur l'attend : peu importe leur nom d'origine.
+*Réglages › Jeux* montre ce qui est prêt et ce qui manque (pour la PS1, selon la région de
+tes jeux).
 
-| Console | Fichiers |
-|---|---|
-| PlayStation | `scph5500.bin` (JP, md5 8dd7d529…), `scph5501.bin` (US, md5 490f666e…), `scph5502.bin` (EU, md5 32736f17…) |
-| PlayStation 2 | le BIOS de ta PS2, n'importe quel nom (PCSX2 le détecte tout seul) |
-| Nintendo DS | facultatif : `bios7.bin`, `bios9.bin`, `firmware.bin` |
+| Console | BIOS | Fichiers |
+|---|---|---|
+| PlayStation 2 | **obligatoire** | celui de ta PS2, n'importe quel nom (PCSX2 le détecte tout seul) |
+| PlayStation | conseillé, un par région | `scph5502.bin` (Europe), `scph5501.bin` (USA), `scph5500.bin` (Japon) |
+| Nintendo DS | facultatif | `bios7.bin`, `bios9.bin` |
+| Game Boy Advance | facultatif | `gba_bios.bin` |
+| 3DS, GameCube, Wii | aucun | |
 
 - **3DS** : Azahar refuse les jeux chiffrés. Décrypte-les depuis ta 3DS avec GodMode9.
   Les `.cia` doivent d'abord être installés depuis Azahar.

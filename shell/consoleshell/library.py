@@ -51,15 +51,35 @@ def _exts(system):
     return set(SYSTEM_INDEX[system][4].split())
 
 
+def dir_as_file(path, exts=None):
+    """Dossier qu'ES-DE montre comme un seul jeu : nommé avec une extension de jeu (« Jeu.m3u ») et
+    contenant le fichier du même nom, qui est celui passé à l'émulateur."""
+    name = os.path.basename(path)
+    ext = os.path.splitext(name)[1].lower()
+    return bool(ext) and (exts is None or ext in exts) and os.path.isfile(os.path.join(path, name))
+
+
+def launch_target(path):
+    """Fichier à donner à l'émulateur (le fichier homonyme pour un dossier vu comme un fichier)."""
+    return os.path.join(path, os.path.basename(path)) if os.path.isdir(path) and dir_as_file(path) else path
+
+
 def count_games(system):
     folder = os.path.join(ROMS_DIR, system)
     exts, n = _exts(system), 0
     try:
         for entry in os.scandir(folder):
+            if entry.name.startswith((".", "_")):
+                continue
             if entry.is_file() and os.path.splitext(entry.name)[1].lower() in exts:
                 n += 1
-            elif entry.is_dir() and not entry.name.startswith("."):
-                n += sum(1 for f in os.listdir(entry.path) if os.path.splitext(f)[1].lower() in exts)
+            elif entry.is_dir() and dir_as_file(entry.path, exts):
+                n += 1
+            elif entry.is_dir():
+                for f in os.listdir(entry.path):
+                    sub = os.path.join(entry.path, f)
+                    if os.path.splitext(f)[1].lower() in exts and (os.path.isfile(sub) or dir_as_file(sub, exts)):
+                        n += 1
     except OSError:
         return 0
     return n
@@ -72,8 +92,9 @@ def systems():
 
 def media(system, rom_path):
     """Image du jeu rangée par ES-DE (ou par les jaquettes automatiques) : même chemin que le jeu dans
-    son dossier de système, sans l'extension (« psx/covers/Final Fantasy VII/Disc 1.png »)."""
-    stem = os.path.splitext(rom_path)[0]
+    son dossier de système, sans l'extension (« psx/covers/Final Fantasy VII/Disc 1.png »). Pour un
+    dossier vu comme un fichier, ES-DE garde son « extension » : « psx/covers/FF7.m3u.png »."""
+    stem = rom_path if os.path.isdir(rom_path) else os.path.splitext(rom_path)[0]
     rel = os.path.relpath(stem, os.path.join(ROMS_DIR, system))
     names = [rel] if not rel.startswith("..") else []
     if os.path.basename(stem) not in names:
@@ -144,7 +165,7 @@ def recent(limit=12):
         out.append({"system": system, "systemName": meta[1] if meta else system, "short": meta[2] if meta else "",
                     "color": meta[3] if meta else "#888", "path": g["path"], "name": g["name"],
                     "ts": g["ts"], "cover": media(system, g["path"]), "direct": direct,
-                    "resume": resume.has_resume(g["path"])})
+                    "resume": resume.has_resume(launch_target(g["path"]))})
         if len(out) >= limit:
             break
     return out
@@ -158,7 +179,7 @@ def remember(system, path, name):
 
 def command(system, path):
     fn = COMMANDS.get(system)
-    return fn(path) if fn else None
+    return fn(launch_target(path)) if fn else None
 
 
 def set_startup(system=None):

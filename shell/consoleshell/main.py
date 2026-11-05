@@ -6,6 +6,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 
@@ -14,7 +15,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from . import covers, health, library, moonlight, network, pcremote, resume  # noqa: E402
+from . import covers, health, importer, library, moonlight, network, pcremote, resume, uploader, usb  # noqa: E402
 from .apps import AppManager, profile_for  # noqa: E402
 from .audio import Audio  # noqa: E402
 from .bluetooth import Bluetooth  # noqa: E402
@@ -86,6 +87,12 @@ class Shell:
         # Jaquettes automatiques : état de la dernière recherche (gardé entre deux démarrages)
         self.covers_state = dict(read_json(COVERS_STATE, {}) or {}, running=False)
         self._games_count = None
+        # Ajout de jeux : envoi depuis un téléphone ou un PC (QR code) et clés USB
+        self.uploader = uploader.Uploader(lambda ev: on_main(self._on_upload, ev),
+                                          name=lambda: self.settings["console_name"] or "Console")
+        self.upload_open = False
+        self.usb_session = None
+        self.usb_watch = None
         self.pin_watch = None            # saisie du code PIN Windows en attente
 
         self.home = HomeWindow(self.on_ui)
@@ -126,6 +133,7 @@ class Shell:
         thread(self._detect_cec, name="cec")
         self.push_all()
         later(120000, self.start_covers)          # laisse la console finir de démarrer
+        self.usb_watch = usb.UsbWatcher(self.on_usb_new, self.on_usb_gone)
 
     def _detect_cec(self):
         if shutil.which("cec-client"):
@@ -317,6 +325,164 @@ class Shell:
             return True
         every(500, check)
 
+    # ============================================================ ajout de jeux
+    def ui_upload_start(self, args, src):
+        """Écran « Ajouter des jeux » : ouvre le petit serveur web et donne de quoi s'y connecter."""
+        self.upload_open = True
+
+        def go(reply):
+            def work():
+                port = self.uploader.start()
+                ip = (self.net or {}).get("ip")
+                ts = (health.tailscale() or {}).get("ip")
+                url = f"http://{ip}:{port}" if ip else None
+                on_main(reply, {"url": url, "code": self.uploader.code,
+                                "remote": f"http://{ts}:{port}" if ts and ts != ip else None,
+                                "qr": uploader.qr_svg(f"{url}/?k={self.uploader.token}") if url else None})
+            thread(work, name="upload-start")
+        return go
+
+    def ui_upload_stop(self, args, src):
+        self.upload_open = False
+        self.uploader.stop()
+
+    def _on_upload(self, ev):
+        self.home.surface.emit("upload", ev)
+        if ev.get("type") == "done":
+            self._after_import(ev.get("results") or [], toast=not self.upload_open)
+
+    def _after_import(self, results, toast=True):
+        games = [r for r in results if r.get("kind") == "game" and r.get("status") == "added"]
+        bios = [r for r in results if r.get("kind") == "bios" and r.get("status") == "added"]
+        if games or bios:
+            self.refresh_library()
+            self.push(bios_changed=time.time())
+        if games:
+            self.start_covers()                   # jaquettes des nouveaux jeux
+        if toast and (games or bios):
+            parts = ([f"{len(games)} jeu{'x' if len(games) > 1 else ''}"] if games else []) + \
+                    ([f"{len(bios)} BIOS"] if bios else [])
+            many = len(games) + len(bios) > 1
+            self.toast(f"{' et '.join(parts)} ajouté{'s' if many else ''}", "Rangés dans ta bibliothèque", "library")
+
+    def ui_bios_status(self, args, src):
+        def go(reply):
+            thread(lambda: on_main(reply, importer.bios_status()), name="bios-status")
+        return go
+
+    # --- clés USB ---
+    def on_usb_new(self, disk, parts):
+        if not self.settings["usb_import"] or self.usb_session:
+            return
+        label = next(iter(parts.values()))["label"]
+        session = self.usb_session = {"disk": disk, "parts": list(parts), "label": label, "state": "scanning",
+                                      "mounted": {}}
+        self.toast(f"« {label} » branchée", "Recherche de jeux et de BIOS…", "folder", 2500)
+
+        def work():
+            mounted, items = {}, []
+            for p in parts:
+                mp = usb.mount(p)
+                if mp:
+                    mounted[p] = mp
+                    try:
+                        items += importer.plan(mp)
+                    except OSError as exc:
+                        log.warning("clé USB %s illisible : %s", p, exc)
+            on_main(self._usb_scanned, session, mounted, items)
+        thread(work, name="usb-plan")
+
+    def _usb_scanned(self, session, mounted, items):
+        session["mounted"] = mounted
+        if self.usb_session is not session:       # retirée pendant l'analyse
+            self._usb_finish(session)
+            return
+        s = importer.summary(items, keep_unknown=False)    # l'inconnu reste sur la clé
+        session.update(items=items, summary=s, state="found")
+        if not (s["games"] or s["bios"] or s["archives"]):
+            self._usb_finish(session)
+            self.toast(f"« {session['label']} »", "Tous ses jeux sont déjà sur la console" if s["present"]
+                       else "Aucun jeu ni BIOS reconnu dessus", "folder")
+            return
+        self._usb_prompt()
+
+    def _usb_prompt(self):
+        s = self.usb_session
+        if not s or s["state"] != "found" or s.get("prompted"):
+            return
+        if self.focus != "home" or self.panel_mode:
+            n = sum(s["summary"]["games"].values())
+            if not s.get("toasted"):
+                s["toasted"] = True
+                self.toast(f"« {s['label']} » : {n} jeu{'x' if n > 1 else ''} trouvé{'s' if n > 1 else ''}",
+                           "Reviens à l'accueil pour les importer", "library", 4000)
+            return
+        s["prompted"] = True
+        self.home.surface.emit("usb", {"type": "found", "label": s["label"], "summary": s["summary"]})
+
+    def ui_usb_import(self, args, src):
+        s = self.usb_session
+        if not s or s["state"] != "found":
+            return False
+        s["state"] = "importing"
+        cancel = s["cancel"] = threading.Event()
+
+        def report(done, total, label):
+            on_main(self.home.surface.emit, "usb", {"type": "progress", "done": done, "total": total, "label": label})
+
+        def work():
+            progress = importer.Progress(s["summary"]["size"], report, cancel)
+            try:
+                results = importer.import_items(s["items"], move=False, progress=progress, keep_unknown=False)
+            except Exception:  # noqa: BLE001
+                log.exception("import depuis la clé USB")
+                results = [{"kind": "error", "status": "error", "label": s["label"], "note": "erreur inattendue"}]
+            on_main(self._usb_imported, s, results, progress.cancelled)
+        thread(work, name="usb-import")
+        return True
+
+    def _usb_imported(self, s, results, cancelled):
+        count = lambda kind, status="added": sum(1 for r in results if r.get("kind") == kind and r.get("status") == status)  # noqa: E731
+        info = {"type": "done", "label": s["label"], "cancelled": cancelled, "removed": bool(s.get("removed")),
+                "games": count("game"), "bios": count("bios"), "to_sort": count("to_sort"),
+                "errors": [r.get("note") for r in results if r.get("status") == "error"][:3]}
+        self._usb_finish(s, then=lambda: self.home.surface.emit("usb", info))
+        self._after_import(results, toast=self.focus != "home")
+
+    def _usb_finish(self, s, then=None):
+        """Démonte la clé (fil à part) et termine la session ; then() une fois la clé retirable."""
+        if self.usb_session is s:
+            self.usb_session = None
+        parts = list((s.get("mounted") or {}).keys())
+
+        def work():
+            for p in parts:
+                usb.unmount(p)
+            if then:
+                on_main(then)
+        thread(work, name="usb-unmount")
+
+    def ui_usb_dismiss(self, args, src):
+        s = self.usb_session
+        if s and s["state"] in ("found", "scanning"):
+            self._usb_finish(s)
+
+    def ui_usb_cancel(self, args, src):
+        s = self.usb_session
+        if s and s.get("cancel"):
+            s["cancel"].set()
+
+    def on_usb_gone(self, part):
+        s = self.usb_session
+        if not s or part not in s["parts"]:
+            return
+        if s["state"] == "importing":
+            s["removed"] = True
+            s["cancel"].set()                     # la copie s'arrête ; la fin d'import fait le ménage
+            return
+        self._usb_finish(s)
+        self.home.surface.emit("usb", {"type": "removed", "label": s["label"]})
+
     # ============================================================ jaquettes
     def start_covers(self, manual=False):
         """Cherche les jaquettes manquantes en arrière-plan, jamais pendant un jeu ou un stream."""
@@ -445,6 +611,7 @@ class Shell:
         self.update_exclusive()
         if focus == "home":
             self.home.surface.emit("shown")
+            self._usb_prompt()                    # clé branchée pendant un jeu : on la propose maintenant
         elif focus == "app":
             self.home.surface.emit("hidden")      # met en pause le fond animé de l'accueil
         elif focus == "panel":

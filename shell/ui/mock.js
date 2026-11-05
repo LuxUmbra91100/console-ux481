@@ -14,7 +14,7 @@
       controller_off_standby: true, resolution: '1080p', ui_sounds: false, osk_layout: 'azerty', browser_scale: 1.5,
       guide_hold_ms: 700, first_run_done: !/wizard/.test(location.hash),
       moonlight_host: '', moonlight_tile_app: 'Steam Big Picture', moonlight_pin_mode: 'wake',
-      theme: 'aurora', bg_motion: 'full', ambient_min: 5, covers_auto: true, resume_games: true },
+      theme: 'aurora', bg_motion: 'full', ambient_min: 5, covers_auto: true, resume_games: true, usb_import: true },
     tiles: [
       { id: 'moonlight', type: 'moonlight', running: false },
       { id: 'games', type: 'games', running: true },
@@ -99,6 +99,9 @@
           return Promise.resolve(true);
         case 'resume-forget': S.library.recent.forEach(g => { if (g.path === args.path) g.resume = false; });
           later(30, () => Shell._emit('state', { library: S.library })); return Promise.resolve(true);
+        case 'upload-start': return Promise.resolve({ url: 'http://192.168.1.50:8765', code: '482913', remote: 'http://100.88.12.4:8765', qr: window.MOCK_QR || null });
+        case 'bios-status': return Promise.resolve({ psx: { have: { eu: 'scph5502.bin' }, games: { eu: 9, us: 2, jp: 0 }, missing: ['us'] },
+          ps2: { have: [{ file: 'SCPH-70004.bin', zone: 'Europe', version: '2.00', date: '17/06/2004' }], games: 8 }, nds: [], gba: ['gba_bios.bin'], unknown: [] });
         case 'settings-set': S.settings[args.key] = args.value; later(30, () => Shell._emit('state', { settings: S.settings })); return Promise.resolve(S.settings);
         default: return Promise.resolve(true);
       }

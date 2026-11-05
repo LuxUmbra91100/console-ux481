@@ -51,6 +51,10 @@ apt_install_available \
   libsdl2-2.0-0 fonts-noto-core fonts-noto-color-emoji fonts-inter fonts-inter-variable \
   librsvg2-bin
 
+# Ajout de jeux : QR code de l'écran « Ajouter des jeux », archives .7z, clés USB formatées en NTFS
+apt_install_available qrencode ntfs-3g
+if pkg_available 7zip; then apt_install 7zip; else apt_install_available p7zip-full; fi
+
 # Locale française disponible (l'interface est en français ; la langue système reste la tienne).
 if ! locale -a 2>/dev/null | grep -qi '^fr_FR\.utf-\?8$'; then
   if sed -i -E 's/^#\s*(fr_FR\.UTF-8 UTF-8)/\1/' /etc/locale.gen; then locale-gen >/dev/null || true; fi

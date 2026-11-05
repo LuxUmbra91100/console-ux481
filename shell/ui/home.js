@@ -194,6 +194,7 @@ function shelfFor(t) {
     const systems = st.library.systems || [], recent = st.library.recent || [];
     const total = systems.reduce((n, s) => n + (s.count || 0), 0);
     items.push({ html: `<div class="card wide">${icon('library')}<div><h3>Bibliothèque</h3><p>Tous tes jeux, jaquettes, favoris (ES-DE).</p></div></div>`, act: () => launch('games') });
+    items.push({ html: `<div class="card wide">${icon('plus')}<div><h3>Ajouter des jeux</h3><p>Depuis ton téléphone ou ton PC (QR code), ou une clé USB.</p></div></div>`, act: () => openUpload(), label: 'Ajouter des jeux' });
     recent.forEach(g => {
       const ph = `<div class="ph" style="background:linear-gradient(160deg, ${g.color || '#555'}, #0b0f1a)">${esc(g.short)}</div>`;
       const resumes = g.resume && (A.st.settings || {}).resume_games !== false;
@@ -205,7 +206,7 @@ function shelfFor(t) {
       act: () => Shell.send('library-open', { system: s.id }), label: s.name }));
     if (!total) {
       const host = (st.net && st.net.hostname) || 'console';
-      items.push({ html: `<div class="card tip" style="grid-template-columns:1fr">${icon('folder')}<div><b>Ajoute tes jeux</b>&nbsp;: depuis ton PC, ouvre <b>\\\\${esc(host)}\\Jeux</b> et dépose-les dans le dossier de chaque console (gba, nds, n3ds, gc, wii, psx, ps2). BIOS PS1/PS2 dans <b>\\\\${esc(host)}\\BIOS</b>.</div></div>`, act: null });
+      items.push({ html: `<div class="card tip" style="grid-template-columns:1fr">${icon('folder')}<div><b>Ajoute tes jeux</b>&nbsp;: « Ajouter des jeux » puis scanne le QR code avec ton téléphone, ou branche une clé USB. Sur un PC, tu peux aussi les déposer dans <b>\\\\${esc(host)}\\Jeux</b> (un dossier par console).</div></div>`, act: null });
     }
     return { title: recent.length ? 'Reprendre' : 'Émulation', items };
   }
@@ -581,7 +582,9 @@ class SettingsLayer extends Layer {
     this.render();
     if (SECTIONS[this.sec].id === 'net') this.scanWifi();
     if (SECTIONS[this.sec].id === 'health') this.loadHealth(true);
+    if (SECTIONS[this.sec].id === 'games') this.loadBios();
   }
+  loadBios() { Shell.call('bios-status').then(b => { this.bios = b; if (A.settings === this) this.render(); }); }
   close() { clearTimeout(this.healthTimer); super.close(); A.settings = null; }
   loadHealth(full) {
     clearTimeout(this.healthTimer);
@@ -653,6 +656,11 @@ class SettingsLayer extends Layer {
       out.push({ static: true, icon: 'moon', title: 'Veille et redémarrage du PC', sub: pr.ssh ? `Par SSH (${pr.ssh})` : 'Non configuré : serveur OpenSSH sur le PC, puis console-pc-setup pc utilisateur@PC' });
     } else if (id === 'games') {
       const cv = st.covers || {};
+      out.push({ group: 'Ajouter des jeux et des BIOS' });
+      out.push({ icon: 'plus', title: 'Depuis un téléphone ou un PC', sub: 'Un QR code à scanner : envoie tout en vrac, la console range', act: () => { this.close(); openUpload(); } });
+      out.push(toggleRow('folder', 'Depuis une clé USB', 'Proposer d\'importer les jeux et BIOS d\'une clé ou d\'un disque dès qu\'il est branché', 'usb_import'));
+      out.push({ group: 'BIOS' });
+      biosRows(this.bios, out, () => { this.close(); openUpload(); });
       out.push({ group: 'Jaquettes' });
       out.push(toggleRow('library', 'Jaquettes automatiques', 'Ajoute celles qui manquent depuis la base libre de libretro, sans compte', 'covers_auto'));
       const last = cv.running ? 'Recherche en cours… (en pause pendant les jeux)' : !cv.last ? 'Pas encore lancée'
@@ -751,6 +759,7 @@ class SettingsLayer extends Layer {
         this.sec = n; this.row = 0; Sound.move(); this.render();
         if (SECTIONS[n].id === 'net' && !this.wifi) this.scanWifi();
         if (SECTIONS[n].id === 'system' && !this.info) Shell.call('info').then(i => { this.info = i; this.render(); });
+        if (SECTIONS[n].id === 'games') this.loadBios();
         if (SECTIONS[n].id === 'health') this.loadHealth(!this.health || Date.now() - (this.healthFull || 0) > 60000);
         else clearTimeout(this.healthTimer);
         if (SECTIONS[n].id === 'display' && this.volume == null) Shell.call('volume', { delta: 0 }).then(v => { this.volume = v && v.volume; this.render(); });
@@ -919,6 +928,147 @@ const Ambient = {
   },
 };
 setInterval(() => Ambient.check(), 5000);
+
+/* -------------------------------------------------------- Ajout de jeux --- */
+const SYS_SHORT = { gba: 'GBA', nds: 'DS', n3ds: '3DS', gc: 'GameCube', wii: 'Wii', psx: 'PS1', ps2: 'PS2' };
+const gbSize = n => n >= 1e9 ? `${(n / 1e9).toFixed(1).replace('.', ',')} Go` : `${Math.max(1, Math.round(n / 1e6))} Mo`;
+
+// Écran « Ajouter des jeux » : QR code à scanner, adresse et code pour un ordinateur, arrivées en direct.
+class UploadLayer extends Layer {
+  constructor() {
+    super(`<div class="scrim"></div><div class="sheet upload">
+      <div class="up-main">
+        <div class="up-qr"><div class="spinner"></div></div>
+        <div class="up-text">
+          <h2>Ajouter des jeux</h2>
+          <ol class="up-steps">
+            <li>Scanne ce code avec l'appareil photo de ton téléphone (même Wi-Fi que la console)</li>
+            <li>Choisis tes jeux et tes BIOS, en vrac, même en .zip</li>
+            <li>La console les range toute seule, jaquettes comprises</li>
+          </ol>
+          <div class="up-manual"></div>
+        </div>
+      </div>
+      <div class="up-feed"><div class="up-now">En attente de fichiers…</div><div class="up-list"></div></div>
+      <div class="hints">${hints([['b', 'Fermer']])}</div></div>`, 'uploads');
+    this.items = [];
+    Shell.call('upload-start').then(info => this.show(info || {}));
+  }
+  show(info) {
+    $('.up-qr', this.el).innerHTML = info.qr || `<div class="up-noqr">${icon('wifi')}</div>`;
+    const lines = [];
+    if (!info.url) lines.push('La console n\'est pas connectée au réseau.');
+    else lines.push(`Sur un ordinateur : <b>${esc(info.url)}</b>`);
+    lines.push(`Code : <b class="up-code num">${esc(String(info.code || '').replace(/^(\d{3})(\d{3})$/, '$1 $2'))}</b>`);
+    if (info.remote) lines.push(`À distance (Tailscale) : <b>${esc(info.remote)}</b>`);
+    $('.up-manual', this.el).innerHTML = lines.map(l => `<div>${l}</div>`).join('');
+  }
+  event(ev) {
+    const now = $('.up-now', this.el);
+    if (ev.type === 'progress') {
+      const pct = ev.total ? Math.floor(ev.done * 100 / ev.total) : 100;
+      setHTML(now, `<span class="up-name">${icon('load')} ${esc(ev.name.split('/').pop())}</span><span class="num">${pct} %</span><span class="bar"><i style="transform:scaleX(${pct / 100})"></i></span>`);
+    } else if (ev.type === 'sorting') {
+      setHTML(now, `<span class="up-name">${icon('sparkle')} Rangement…</span>`);
+    } else if (ev.type === 'done') {
+      setHTML(now, 'En attente de fichiers…');
+      const res = (ev.results || []).filter(r => ['game', 'bios', 'to_sort'].includes(r.kind) && ['added', 'present'].includes(r.status));
+      this.items = res.map(r => r.kind === 'game' ? { cls: r.status === 'added' ? 'ok' : '', tag: SYS_SHORT[r.system] || r.system, label: r.label }
+        : r.kind === 'bios' ? { cls: 'bios', tag: 'BIOS', label: r.label } : { cls: 'warn', tag: 'À trier', label: r.label }).concat(this.items).slice(0, 12);
+      $('.up-list', this.el).innerHTML = this.items.map(i => `<div class="chip ${i.cls}"><b>${esc(i.tag)}</b>${esc(i.label)}</div>`).join('');
+      if (res.some(r => r.status === 'added')) Sound.select();
+    }
+  }
+  handle(b) { if (b === 'b' || b === 'back' || b === 'a') { Sound.back(); this.close(); } }
+  close() { Shell.send('upload-stop'); super.close(); }
+}
+function openUpload() { if (!A.layers.some(l => l instanceof UploadLayer)) new UploadLayer(); }
+Shell.on('upload', ev => { const l = A.layers.find(x => x instanceof UploadLayer); if (l) l.event(ev); });
+
+// Clé USB : proposition, progression, fin.
+class UsbProgressLayer extends Layer {
+  constructor(label) {
+    super(`<div class="scrim"></div><div class="sheet dialog usbprog"><h2>Importation depuis « ${esc(label)} »</h2>
+      <p class="usb-cur">Préparation…</p><div class="bar big"><i></i></div><p class="usb-pct num"></p>
+      <div class="hints">${hints([['x', 'Annuler'], ['b', 'Masquer']])}</div></div>`);
+    this.finished = false;
+  }
+  update(ev) {
+    if (this.finished) return;
+    const pct = ev.total ? Math.min(100, Math.floor(ev.done * 100 / ev.total)) : 0;
+    $('.usb-cur', this.el).textContent = ev.label || '';
+    $('.bar i', this.el).style.transform = `scaleX(${pct / 100})`;
+    $('.usb-pct', this.el).textContent = `${pct} % · ${gbSize(ev.done)} sur ${gbSize(ev.total)}`;
+  }
+  done(ev) {
+    this.finished = true;
+    $('h2', this.el).textContent = ev.removed ? 'Clé retirée pendant la copie' : ev.cancelled ? 'Importation arrêtée' : 'Importation terminée';
+    $('.usb-cur', this.el).textContent = usbDoneText(ev);
+    $('.bar i', this.el).style.transform = 'scaleX(1)';
+    $('.usb-pct', this.el).textContent = ev.removed ? '' : 'Tu peux retirer la clé.';
+    setHTML($('.hints', this.el), hints([['a', 'OK']]));
+  }
+  handle(b) {
+    if (this.finished) { if (['a', 'b', 'back'].includes(b)) { Sound.select(); this.close(); } return; }
+    if (b === 'x') confirm('Arrêter l\'importation ?', 'Les jeux déjà copiés restent sur la console.', 'Arrêter', () => Shell.send('usb-cancel'), true);
+    else if (b === 'b' || b === 'back') { Sound.back(); A.usbHidden = true; this.close(); }
+  }
+}
+function usbDoneText(ev) {
+  const parts = [];
+  if (ev.games) parts.push(`${ev.games} jeu${ev.games > 1 ? 'x' : ''}`);
+  if (ev.bios) parts.push(`${ev.bios} BIOS`);
+  let t = parts.length ? `${parts.join(' et ')} ajouté${ev.games + ev.bios > 1 ? 's' : ''}.` : 'Rien de nouveau ajouté.';
+  if (ev.to_sort) t += ` ${ev.to_sort} fichier${ev.to_sort > 1 ? 's' : ''} non reconnu${ev.to_sort > 1 ? 's' : ''} dans « _À trier ».`;
+  if (ev.errors && ev.errors.length) t += ` Problème : ${ev.errors[0]}.`;
+  return t;
+}
+Shell.on('usb', ev => {
+  const prog = A.layers.find(l => l instanceof UsbProgressLayer);
+  if (ev.type === 'found') {
+    const s = ev.summary, n = Object.values(s.games).reduce((a, b) => a + b, 0), lines = [];
+    if (n) lines.push(`<b>${n} jeu${n > 1 ? 'x' : ''}</b> : ${Object.entries(s.games).map(([k, v]) => `${esc(SYS_SHORT[k] || k)} ${v}`).join(' · ')}`);
+    if (s.bios.length) lines.push(`<b>BIOS</b> : ${s.bios.map(esc).join(', ')}`);
+    if (s.archives) lines.push(`${s.archives} archive${s.archives > 1 ? 's' : ''} à décompresser`);
+    if (s.to_sort) lines.push(`${s.to_sort} fichier${s.to_sort > 1 ? 's' : ''} non reconnu${s.to_sort > 1 ? 's' : ''} : laissé${s.to_sort > 1 ? 's' : ''} sur la clé`);
+    if (s.present) lines.push(`${s.present} déjà sur la console : ignoré${s.present > 1 ? 's' : ''}`);
+    Sound.select();
+    menu({ title: `Clé USB « ${ev.label} »`, text: lines.join('<br>'), onCancel: () => Shell.send('usb-dismiss'), items: [
+      { icon: 'check', label: 'Importer', sub: gbSize(s.size), action: () => { A.usbHidden = false; Shell.send('usb-import'); new UsbProgressLayer(ev.label); } },
+      { icon: 'back', label: 'Ne rien faire', action: () => Shell.send('usb-dismiss') }] });
+  } else if (ev.type === 'progress') {
+    if (prog) prog.update(ev);
+  } else if (ev.type === 'done') {
+    if (prog) prog.done(ev);
+    else notice(ev.cancelled ? 'Importation arrêtée' : 'Importation terminée', `${usbDoneText(ev)} ${ev.removed ? '' : 'Tu peux retirer la clé.'}`);
+  } else if (ev.type === 'removed') {
+    A.layers.filter(l => l instanceof MenuLayer && /^Clé USB/.test($('h2', l.el).textContent)).forEach(l => l.close());
+  }
+});
+
+// Réglages › Jeux : état des BIOS (Ⓐ sur une ligne ouvre « Ajouter des jeux »)
+function biosRows(b, out, open) {
+  if (!b) { out.push({ static: true, icon: 'chip', title: 'Vérification des BIOS…' }); return; }
+  const val = (cls, t) => `<span class="hval ${cls}">${t}</span>`;
+  const R = { eu: 'Europe', us: 'USA', jp: 'Japon' }, F = { eu: 'scph5502', us: 'scph5501', jp: 'scph5500' };
+  const p2 = b.ps2.have;
+  out.push({ icon: 'chip', title: 'PlayStation 2', act: open,
+    sub: p2.length ? p2.map(x => `${x.zone} v${x.version} (${x.date.slice(-4)})`).join(' · ') : 'Obligatoire pour jouer : le BIOS de ta PS2, n\'importe quel nom',
+    value: p2.length ? val('ok', 'Prêt') : val(b.ps2.games ? 'bad' : 'warn', 'Manquant') });
+  const have = Object.keys(b.psx.have).filter(k => R[k]).map(k => R[k]);
+  const miss = b.psx.missing.map(r => `${R[r]} (${F[r]}.bin)`);
+  out.push({ icon: 'chip', title: 'PlayStation', act: open,
+    sub: miss.length ? `Il manque ${miss.join(', ')} pour tes jeux de ${miss.length > 1 ? 'ces régions' : 'cette région'}`
+      : have.length ? `Présents : ${have.join(', ')}` : 'Conseillé : un par région (scph5502 Europe, scph5501 USA, scph5500 Japon)',
+    value: miss.length ? val('warn', 'Incomplet') : have.length ? val('ok', 'Prêt') : val('', 'Conseillé') });
+  out.push({ icon: 'chip', title: 'Nintendo DS', act: open, sub: b.nds.length ? b.nds.join(', ') : 'Facultatif : bios7.bin, bios9.bin',
+    value: b.nds.length ? val('ok', 'Présent') : val('', 'Facultatif') });
+  out.push({ icon: 'chip', title: 'Game Boy Advance', act: open, sub: b.gba.length ? 'gba_bios.bin' : 'Facultatif : gba_bios.bin',
+    value: b.gba.length ? val('ok', 'Présent') : val('', 'Facultatif') });
+  out.push({ icon: 'info', title: '3DS, GameCube et Wii', sub: 'Aucun BIOS nécessaire', act: open });
+  if (b.unknown.length) out.push({ icon: 'warning', title: `${b.unknown.length} fichier${b.unknown.length > 1 ? 's' : ''} non reconnu${b.unknown.length > 1 ? 's' : ''} dans BIOS`,
+    sub: b.unknown.slice(0, 3).join(', ') + (b.unknown.length > 3 ? '…' : ''), act: open });
+}
 
 /* ------------------------------------------------------------- Santé ----- */
 function healthRows(d, out, refresh) {
@@ -1138,6 +1288,7 @@ function scheduleRender(partial) {
     renderCaption();
     if (all || k.has('moonlight') || k.has('library') || k.has('presets') || k.has('net')) renderShelf(true);
     renderSys(); renderHints();
+    if (A.settings && k.has('bios_changed') && SECTIONS[A.settings.sec].id === 'games') A.settings.loadBios();
     if (A.settings && ['bt', 'net', 'settings', 'display', 'sleep', 'moonlight', 'moonlight_pins', 'pc_remote', 'covers'].some(x => k.has(x))) A.settings.render();
     if (A.wizard && A.layers.includes(A.wizard) && (k.has('pads') || k.has('net'))) A.wizard.refresh();
     if (A.st.settings && A.st.settings.first_run_done === false && !A.wizardShown) { A.wizardShown = true; startWizard(); }
