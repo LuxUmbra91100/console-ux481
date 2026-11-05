@@ -36,7 +36,7 @@
 .vignette { position: absolute; inset: 0;
   background: radial-gradient(120% 90% at 50% 20%, transparent 40%, rgba(2, 3, 8, .75) 100%),
               linear-gradient(180deg, rgba(5, 7, 13, .25) 0%, transparent 30%, rgba(5, 7, 13, .6) 100%); }
-body.bg-paused #bg > div { animation-play-state: paused; }
+body.bg-paused #bg > div, body.layers-open #bg > div { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { #bg > div { animation: none; } }
 
 /* ---- Barre du haut ---- */
@@ -68,8 +68,16 @@ body.bg-paused #bg > div { animation-play-state: paused; }
 #row { position: absolute; left: 4rem; top: 1.2rem; display: flex; gap: 1.3rem; align-items: center;
   transition: transform .45s var(--ease-out); will-change: transform; }
 .tile { position: relative; flex: none; width: 10.4rem; height: 10.4rem; border-radius: var(--radius-lg);
-  overflow: hidden; transform-origin: 50% 60%; background: #1a2033;
-  box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .35); transition: transform .32s var(--ease), box-shadow .32s var(--ease), opacity .3s; }
+  transform-origin: 50% 60%; background: #1a2033; isolation: isolate; will-change: transform;
+  box-shadow: 0 .8rem 2rem rgba(0, 0, 0, .35); transition: transform .32s var(--ease), opacity .3s; }
+/* Halo et anneau de sélection peints une seule fois sur leurs propres calques : seule leur opacité
+   change (travail du compositeur). Animer box-shadow (grands flous) faisait repeindre les tuiles à
+   chaque image pendant chaque déplacement, d'où des saccades. */
+.tile::before, .tile::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  opacity: 0; transition: opacity .28s var(--ease); will-change: opacity; }
+.tile::before { z-index: -1; box-shadow: 0 1.6rem 3.4rem rgba(0, 0, 0, .55), 0 0 4rem var(--glow, rgba(124, 92, 255, .35)); }
+.tile::after { z-index: 5; box-shadow: 0 0 0 .22rem var(--ring); }
+.tile .tile-bg, .tile .tile-art { border-radius: inherit; overflow: hidden; }
 .tile.hero { width: 15.6rem; }
 .tile .tile-bg { position: absolute; inset: 0; }
 .tile .tile-bg::after { content: ""; position: absolute; inset: 0;
@@ -92,13 +100,15 @@ body.bg-paused #bg > div { animation-play-state: paused; }
 .tile .dot.on { background: var(--ok); } .tile .dot.busy { background: var(--warn); }
 .tile.add { background: transparent; box-shadow: none; border: .14rem dashed rgba(255, 255, 255, .22); }
 .tile.add .tile-art .icon { width: 3rem; height: 3rem; color: var(--text-2); }
-.tile.focus { transform: scale(1.1) translateY(-.3rem); z-index: 3;
-  box-shadow: 0 0 0 .22rem var(--ring), 0 1.6rem 3.4rem rgba(0, 0, 0, .55), 0 0 4rem var(--glow, rgba(124, 92, 255, .35)); }
+.tile.focus { transform: scale(1.1) translateY(-.3rem); z-index: 3; }
+.tile.focus::before, .tile.focus::after { opacity: 1; }
 .tile.add.focus { border-color: transparent; background: rgba(255, 255, 255, .06); }
 .tile.moving { animation: wiggle .5s ease-in-out infinite; }
 @keyframes wiggle { 0%, 100% { transform: scale(1.1) rotate(-1.2deg); } 50% { transform: scale(1.1) rotate(1.2deg); } }
 .row-dim .tile:not(.focus) { opacity: .55; }
-#main.in-shelf .tile.focus, #main.in-sys .tile.focus { transform: scale(1.02); box-shadow: 0 0 0 .16rem rgba(255, 255, 255, .45), 0 1rem 2.4rem rgba(0, 0, 0, .5); }
+#main.in-shelf .tile.focus, #main.in-sys .tile.focus { transform: scale(1.02); }
+#main.in-shelf .tile.focus::before, #main.in-sys .tile.focus::before { opacity: 0; }
+#main.in-shelf .tile.focus::after, #main.in-sys .tile.focus::after { opacity: .45; }
 
 /* ---- Légende ---- */
 #caption { position: absolute; top: 22.4rem; left: 4rem; right: 4rem; transition: opacity .25s; }
@@ -114,9 +124,10 @@ body.bg-paused #bg > div { animation-play-state: paused; }
   transition: transform .4s var(--ease-out), opacity .25s; }
 #shelfTrack.swap { opacity: 0; transform: translateY(.6rem); transition: none; }
 .card { position: relative; flex: none; border-radius: 1.1rem; overflow: hidden; background: rgba(255, 255, 255, .06);
-  box-shadow: inset 0 0 0 1px var(--line); transition: transform .26s var(--ease), box-shadow .26s var(--ease); }
-.card.focus { transform: scale(1.06); z-index: 2;
-  box-shadow: 0 0 0 .2rem var(--ring), 0 1.2rem 2.6rem rgba(0, 0, 0, .55); }
+  box-shadow: inset 0 0 0 1px var(--line); outline: .2rem solid transparent; will-change: transform;
+  transition: transform .26s var(--ease), outline-color .18s var(--ease); }
+/* Anneau en « outline » (fin, sans flou : redessin négligeable) au lieu d'une ombre animée. */
+.card.focus { transform: scale(1.06); z-index: 2; outline-color: var(--ring); }
 .card.poster { width: 8.6rem; height: 12.2rem; }
 .card.poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card.poster .ph { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2rem; font-weight: 800;

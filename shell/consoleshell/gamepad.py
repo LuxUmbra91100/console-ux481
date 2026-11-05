@@ -13,6 +13,7 @@
 import ctypes
 import os
 import queue
+import select
 import threading
 import time
 
@@ -42,6 +43,7 @@ AXIS_MAX = 32767.0
 STICK_ON, STICK_OFF = 0.55, 0.35
 TRIGGER_ON, TRIGGER_OFF = 0.6, 0.3
 REPEAT_DELAY, REPEAT_RATE, REPEAT_FAST = 0.38, 0.11, 0.06
+IDLE_WAIT = 0.1      # au repos : réveil immédiat sur évènement, sinon 10 fois par seconde (branchements)
 
 # Codes evdev (linux/input-event-codes.h) pour la lecture exclusive.
 EV_KEY, EV_ABS = 1, 3
@@ -96,6 +98,7 @@ class Pad:
         self.raw = None         # correspondance codes evdev → boutons/axes
         self.hat = [0, 0]
         self.grab_failed = False
+        self.wake_fd = None     # lecture « témoin » du nœud evdev : réveille le thread dès qu'un évènement arrive
 
 
 class GamepadThread(threading.Thread):
@@ -111,14 +114,25 @@ class GamepadThread(threading.Thread):
         self._last_activity_emit = 0.0
         self._last_power_check = 0.0
         self.exclusive = False
+        self._wake_r, self._wake_w = os.pipe()          # réveil du thread pour les requêtes (vibration…)
+        os.set_blocking(self._wake_r, False)
+        os.set_blocking(self._wake_w, False)
 
     # ------------------------------------------------------------- API ----
+    def _notify(self):
+        try:
+            os.write(self._wake_w, b"!")
+        except OSError:
+            pass
+
     def rumble(self, strength=0.35, ms=180, pad_id=None):
         self.requests.put(("rumble", strength, ms, pad_id))
+        self._notify()
 
     def set_exclusive(self, on):
         """Menu de la console ouvert au-dessus d'une appli : la manette n'est plus lue que par la console."""
         self.requests.put(("exclusive", bool(on)))
+        self._notify()
 
     def connected(self):
         return [dict(p.info, power=p.power) for p in self.pads.values()]
@@ -162,7 +176,51 @@ class GamepadThread(threading.Thread):
                 p.held or p.stick_dir or abs(p.axes[0]) > 0.1 or abs(p.axes[1]) > 0.1
                 or abs(p.axes[2]) > 0.1 or abs(p.axes[3]) > 0.1 or p.guide_down
                 for p in self.pads.values())
-            time.sleep(0.008 if busy else 0.025)
+            self._wait(0.008 if busy else IDLE_WAIT)
+
+    def _wait(self, timeout):
+        """Dort jusqu'au prochain évènement d'une manette (réveil immédiat) ou jusqu'à l'échéance.
+
+        Auparavant, un sommeil fixe de 25 ms au repos retardait la prise en compte d'un appui d'autant.
+        """
+        grabbed = {pad.dev.fd for pad in self.pads.values() if pad.dev is not None}
+        fds = [self._wake_r, *grabbed]
+        fds += [pad.wake_fd for pad in self.pads.values() if pad.dev is None and pad.wake_fd is not None]
+        try:
+            ready, _, _ = select.select(fds, [], [], timeout)
+        except (OSError, ValueError):
+            time.sleep(timeout)
+            return
+        for fd in ready:
+            if fd in grabbed:
+                continue                       # lu ensuite par _read_raw
+            try:
+                while os.read(fd, 4096):       # on vide : SDL lit ses propres copies des évènements
+                    pass
+            except (BlockingIOError, InterruptedError):
+                pass
+            except OSError:                    # manette éteinte : SDL signalera son retrait
+                for pad in self.pads.values():
+                    if pad.wake_fd == fd:
+                        self._close_wake(pad)
+
+    @staticmethod
+    def _open_wake(path):
+        if not path:
+            return None
+        try:
+            return os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _close_wake(pad):
+        if pad.wake_fd is not None:
+            try:
+                os.close(pad.wake_fd)
+            except OSError:
+                pass
+            pad.wake_fd = None
 
     def _process_requests(self):
         while True:
@@ -293,6 +351,7 @@ class GamepadThread(threading.Thread):
             pad = self.pads.pop(ev.cdevice.which, None)
             if pad:
                 self._ungrab(pad)
+                self._close_wake(pad)
                 sdl2.SDL_GameControllerClose(pad.gc)
                 log.info("manette déconnectée : %s", pad.info["name"])
                 if self.mapper:
@@ -348,6 +407,7 @@ class GamepadThread(threading.Thread):
             pad.path = raw_path.decode() if raw_path else None
         except Exception:  # noqa: BLE001
             pad.path = None
+        pad.wake_fd = self._open_wake(pad.path)
         self.pads[instance] = pad
         pad.power = self._power(pad)
         log.info("manette connectée : %s (%s, %s)", name, ctype, info["guid"])

@@ -1,6 +1,7 @@
 """console-shell : l'écran d'accueil et le « système » de la console."""
 import datetime
 import os
+import queue
 import shutil
 import signal
 import subprocess
@@ -87,6 +88,11 @@ class Shell:
         self.pad = GamepadThread(self.on_pad, self.mapper)
         self.pad.guide_hold = max(0.3, (self.settings["guide_hold_ms"] or 700) / 1000)
         self.pad.start()
+        # Commandes audio (pactl) dans un fil dédié, en série : elles prenaient jusqu'à 100 ms par appui
+        # sur le fil de l'interface (ouverture du menu, réglage du volume).
+        self.volume = None
+        self._audio_jobs = queue.Queue()
+        thread(self._audio_worker, name="audio-jobs")
         SwayEvents(lambda name, data: on_main(self.on_sway, name, data)).start()
         ControlServer(CONTROL_SOCKET, self.on_ctl).start()
         self.settings.on_change(self.on_setting)
@@ -377,14 +383,13 @@ class Shell:
             return
         was_interactive = self.panel_mode in ("menu", "osk", "dialog")
         self.panel_mode = None
+        self.panel.release()                  # clavier et clics rendus tout de suite à l'appli
         self.panel.surface.emit("close")
-
-        def finish():
-            if self.panel_mode is None:
-                self.panel.hide()
-            if then:
-                then()
-        later(160, finish)
+        if then:
+            later(160, then)
+        # La page garée doit avoir affiché une image vide (accusé « panel-closed » après son fondu),
+        # sinon la prochaine ouverture montrerait une image de l'ancien menu. Filet : 700 ms.
+        later(700, self._park_panel)
         if was_interactive:
             self.focus = self.panel_return if self.panel_return != "panel" else "home"
             if self.focus == "app" and not self.apps.current():
@@ -393,6 +398,33 @@ class Shell:
             self.update_exclusive()
             if self.focus == "home":
                 self.home.surface.emit("shown")
+
+    def _park_panel(self):
+        if self.panel_mode is None:
+            self.panel.hide()
+
+    def ui_panel_closed(self, args, src):
+        self._park_panel()
+
+    # ================================================================== audio
+    def _audio_worker(self):
+        while True:
+            fn, done = self._audio_jobs.get()
+            try:
+                result = fn()
+            except Exception:  # noqa: BLE001
+                log.exception("commande audio")
+                result = None
+            on_main(self._audio_done, result, done)
+
+    def _audio_done(self, result, done):
+        if isinstance(result, dict) and "volume" in result:
+            self.volume = result
+        if done:
+            done(result)
+
+    def audio_job(self, fn, done=None):
+        self._audio_jobs.put((fn, done))
 
     def splash(self, data):
         if self.panel_mode in ("menu", "osk", "dialog"):
@@ -424,11 +456,13 @@ class Shell:
             "is_moonlight": bool(app and app.kind == "moonlight"),
             "can_pin": bool(app and app.kind == "moonlight" and self.pin_for(app)),
             "tabs": self.brave.tabs() if app and app.kind == "brave" else [],
-            "volume": self.audio.get_volume(),
+            "volume": self.volume or {},
             "pads": list(self.pads.values()),
             "standby_mode": self.settings["standby_mode"],
         }
         self.open_panel("menu", data)
+        self.audio_job(self.audio.get_volume,
+                       lambda v: self.panel_mode == "menu" and v and self.panel.surface.emit("volume", v))
 
     def open_osk(self, field, target):
         self.osk_context = {"target": target}
@@ -909,8 +943,10 @@ class Shell:
 
     def ui_volume(self, args, src):
         if "set" in args:
-            return self.audio.set_volume(args["set"])
-        return self.audio.volume(args.get("delta", 0))
+            job = lambda: self.audio.set_volume(args["set"])  # noqa: E731
+        else:
+            job = lambda: self.audio.volume(args.get("delta", 0))  # noqa: E731
+        return lambda reply: self.audio_job(job, reply)
 
     def ui_info(self, args, src):
         disk = shutil.disk_usage(os.path.expanduser("~"))
@@ -1069,9 +1105,13 @@ class Shell:
         elif cmd == "home":
             self.close_panel(self.show_home)
         elif cmd == "volume":
-            vol = self.audio.volume(args[0] if args else 0)
-            self.toast("Volume", sub=("muet" if vol.get("muted") else f"{vol.get('volume')} %"), icon="volume", ms=1400)
-            return vol
+            arg = args[0] if args else 0
+
+            def shown(vol):
+                if vol:
+                    self.toast("Volume", sub=("muet" if vol.get("muted") else f"{vol.get('volume')} %"),
+                               icon="volume", ms=1400)
+            self.audio_job(lambda: self.audio.volume(arg), shown)
         elif cmd == "seat-idle":
             self.power.seat(True)
         elif cmd == "seat-active":

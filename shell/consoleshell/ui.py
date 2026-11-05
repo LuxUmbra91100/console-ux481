@@ -132,7 +132,11 @@ class HomeWindow:
 
 
 class LayerWindow:
-    """Surface wlr-layer-shell au-dessus de tout (y compris des jeux plein écran)."""
+    """Surface wlr-layer-shell au-dessus de tout (y compris des jeux plein écran).
+
+    À la fermeture, ne la cacher qu'après que la page a affiché une image vide : sinon, à la
+    réouverture, sway remontre d'abord la dernière image gardée (l'ancien menu), d'où un clignotement.
+    """
 
     def __init__(self, name, page, handler, anchors=("top", "bottom", "left", "right"),
                  size=None, margins=None):
@@ -193,14 +197,19 @@ class LayerWindow:
 
     def show(self, interactive):
         """interactive=True : prend le clavier (le jeu dessous perd le focus et se met en pause)."""
-        self._set_keyboard(interactive)
         if not self.visible:
             self.window.show_all()
             self.visible = True
+        self._set_keyboard(interactive)
         self._set_input(interactive)
 
+    def release(self):
+        """Rend tout de suite clavier et clics à l'appli dessous (fermeture), avant la fin de l'animation."""
+        self._set_keyboard(False)
+        self._set_input(False)
+
     def hide(self):
+        self.release()
         if self.visible:
-            self._set_keyboard(False)
             self.window.hide()
             self.visible = False

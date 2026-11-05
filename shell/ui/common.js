@@ -101,17 +101,24 @@ function hints(list) {
 }
 
 /* ------------------------------------------------------------------- Sons ---- */
+// Sons de l'interface. Le contexte audio reste actif tant qu'on s'en sert (mise en sommeil après une
+// minute de silence ou quand l'accueil est caché) : le relancer à chaque appui retardait le son de
+// plusieurs dizaines de millisecondes, et la sortie HDMI de la TV avalait souvent le premier.
 const Sound = {
   enabled: true, ctx: null, idle: null,
   _ensure() {
     if (!this.enabled) return null;
     try {
-      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
       if (this.ctx.state === 'suspended') this.ctx.resume();
     } catch (e) { return null; }
     clearTimeout(this.idle);
-    this.idle = setTimeout(() => { try { this.ctx && this.ctx.suspend(); } catch (e) {} }, 2500);
+    this.idle = setTimeout(() => this.sleep(), 60000);
     return this.ctx;
+  },
+  sleep() {
+    clearTimeout(this.idle);
+    try { if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); } catch (e) {}
   },
   _tone(freq, dur, type = 'sine', gain = 0.05, when = 0, slide = 0) {
     const ctx = this._ensure(); if (!ctx) return;
@@ -130,6 +137,10 @@ const Sound = {
   key() { this._tone(1700, 0.03, 'triangle', 0.025); },
   toast() { this._tone(988, 0.08, 'sine', 0.04); this._tone(1480, 0.12, 'sine', 0.035, 0.08); },
 };
+
+// N'écrit dans le DOM que si le contenu a changé : les mises à jour périodiques (état du PC, réseau…)
+// ne reconstruisent plus des panneaux identiques.
+function setHTML(el, html) { if (el && el._html !== html) { el._html = html; el.innerHTML = html; } }
 
 /* ------------------------------------------------- Navigation spatiale ------ */
 // Choisit l'élément le plus proche dans une direction parmi « candidates ».

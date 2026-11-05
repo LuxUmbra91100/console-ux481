@@ -73,8 +73,8 @@ function renderTop() {
   const net = A.st.net || {};
   const netIcon = net.kind === 'ethernet' ? icon('ethernet') : net.connected ? icon('wifi') : icon('wifiOff');
   const now = new Date();
-  $('#status').innerHTML = `${padHtml}<span class="pill${net.connected ? '' : ' dim'}">${netIcon}</span>
-    <div class="clock"><div class="time num">${clock(now)}</div><div class="date">${esc(dateLine(now))}</div></div>`;
+  setHTML($('#status'), `${padHtml}<span class="pill${net.connected ? '' : ' dim'}">${netIcon}</span>
+    <div class="clock"><div class="time num">${clock(now)}</div><div class="date">${esc(dateLine(now))}</div></div>`);
 }
 
 function tileHtml(t, focused) {
@@ -153,8 +153,8 @@ function captionFor(t) {
 function renderCaption() {
   const t = focusedTile(); if (!t) return;
   const [title, sub] = captionFor(t);
-  $('#capTitle').innerHTML = title;
-  $('#capSub').innerHTML = sub;
+  setHTML($('#capTitle'), title);
+  setHTML($('#capSub'), sub);
   // Le fond ne suit plus la tuile sélectionnée : c'est une animation d'ambiance continue (home.css).
 }
 
@@ -270,7 +270,7 @@ function markShelf() {
 }
 
 function renderSys() {
-  $('#sys').innerHTML = SYS_BUTTONS.map((b, i) => `<div class="sysbtn${A.zone === 'sys' && i === A.yi ? ' focus' : ''}">${icon(b.id === 'net' && A.st.net && A.st.net.kind === 'ethernet' ? 'ethernet' : b.icon)}<span class="tip">${esc(b.label)}</span></div>`).join('');
+  setHTML($('#sys'), SYS_BUTTONS.map((b, i) => `<div class="sysbtn${A.zone === 'sys' && i === A.yi ? ' focus' : ''}">${icon(b.id === 'net' && A.st.net && A.st.net.kind === 'ethernet' ? 'ethernet' : b.icon)}<span class="tip">${esc(b.label)}</span></div>`).join(''));
 }
 
 function renderHints() {
@@ -283,7 +283,7 @@ function renderHints() {
       t && !['add', 'running'].includes(t.type) ? ['y', 'Options'] : null, ['start', 'Alimentation']];
   } else if (A.zone === 'shelf') list = [['a', 'Lancer'], ['b', 'Retour']];
   else list = [['a', 'Ouvrir'], ['b', 'Retour']];
-  $('#hints').innerHTML = hints(list);
+  setHTML($('#hints'), hints(list));
 }
 
 function renderAll() {
@@ -392,9 +392,11 @@ class Layer {
     this.el = h(`<div class="layer ${cls}">${html}</div>`);
     $('#layers').appendChild(this.el);
     A.layers.push(this);
+    document.body.classList.add('layers-open');      // fond animé en pause derrière le voile
   }
   close() {
     const i = A.layers.indexOf(this); if (i >= 0) A.layers.splice(i, 1);
+    document.body.classList.toggle('layers-open', A.layers.length > 0);
     this.el.remove(); renderHints();
     this.onClose && this.onClose();
   }
@@ -635,13 +637,13 @@ class SettingsLayer extends Layer {
   }
   render() {
     const nav = $('nav', this.el);
-    nav.innerHTML = `<h2>Réglages</h2>` + SECTIONS.map((s, i) => `<div class="nav-item${i === this.sec ? ' sel' : ''}${this.col === 0 && i === this.sec ? ' focus' : ''}">${icon(s.icon)}${esc(s.label)}</div>`).join('');
+    setHTML(nav, `<h2>Réglages</h2>` + SECTIONS.map((s, i) => `<div class="nav-item${i === this.sec ? ' sel' : ''}${this.col === 0 && i === this.sec ? ' focus' : ''}">${icon(s.icon)}${esc(s.label)}</div>`).join(''));
     const rows = this.rows();
     this.focusables = rows.map((r, i) => (!r.group && !r.static) ? i : -1).filter(i => i >= 0);
     this.row = Math.min(this.row, Math.max(0, this.focusables.length - 1));
     const sec = SECTIONS[this.sec];
-    $('.content-inner', this.el).innerHTML = `<h3>${esc(sec.label)}</h3>` + rows.map((r, i) => r.group ? `<div class="group">${esc(r.group)}</div>` :
-      `<div class="srow${r.static ? ' static' : ''}${this.col === 1 && this.focusables[this.row] === i ? ' focus' : ''}" data-i="${i}">${icon(r.icon || 'chevron')}<div class="txt"><b>${esc(r.title)}</b>${r.sub ? `<span>${esc(r.sub)}</span>` : ''}</div><div class="val">${r.value || ''}</div></div>`).join('');
+    setHTML($('.content-inner', this.el), `<h3>${esc(sec.label)}</h3>` + rows.map((r, i) => r.group ? `<div class="group">${esc(r.group)}</div>` :
+      `<div class="srow${r.static ? ' static' : ''}${this.col === 1 && this.focusables[this.row] === i ? ' focus' : ''}" data-i="${i}">${icon(r.icon || 'chevron')}<div class="txt"><b>${esc(r.title)}</b>${r.sub ? `<span>${esc(r.sub)}</span>` : ''}</div><div class="val">${r.value || ''}</div></div>`).join(''));
     this._rows = rows;
     const inner = $('.content-inner', this.el), focusEl = $('.srow.focus', this.el);
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
@@ -833,7 +835,7 @@ Shell.on('state', partial => {
 // Fond animé en pause quand l'accueil est caché (appli ou jeu au premier plan) : rien ne tourne pour rien.
 const pauseBg = paused => document.body.classList.toggle('bg-paused', paused);
 Shell.on('shown', () => { pauseBg(false); renderAll(); });
-Shell.on('hidden', () => pauseBg(true));
+Shell.on('hidden', () => { pauseBg(true); Sound.sleep(); });
 document.addEventListener('visibilitychange', () => pauseBg(document.hidden));
 Shell.on('power-menu', () => powerMenu());
 Shell.on('pairing', ev => { A.layers.forEach(l => l instanceof PairingLayer && l.state(ev)); });

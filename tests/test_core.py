@@ -368,6 +368,25 @@ class ExclusivePadTests(unittest.TestCase):
         self.assertTrue(self.devices[-1].closed)
         self.assertIsNone(self.pad.dev)
 
+    def test_wakes_up_immediately_on_controller_event(self):
+        import time
+        r, w = os.pipe()
+        os.set_blocking(r, False)
+        self.pad.wake_fd = r                  # tient lieu du nœud evdev de la manette
+        try:
+            t0 = time.monotonic()
+            threading = __import__("threading")
+            threading.Timer(0.05, lambda: os.write(w, b"x" * 24)).start()
+            self.t._wait(2.0)
+            woke = time.monotonic() - t0
+            self.assertLess(woke, 0.5, "le thread doit se réveiller dès l'évènement, pas à l'échéance")
+            t1 = time.monotonic()
+            self.t._wait(0.15)                # évènement consommé : on attend bien l'échéance
+            self.assertGreater(time.monotonic() - t1, 0.12)
+        finally:
+            os.close(w)
+            self.t._close_wake(self.pad)
+
     def test_layouts(self):
         lay = self.gp.raw_layout(self.FakeDevice("/x"), "xbox")
         self.assertEqual((lay["buttons"][0x133], lay["axes"][2][1], lay["axes"][3][0]), ("x", "trigger", 2))

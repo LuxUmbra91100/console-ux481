@@ -2,14 +2,18 @@
 #root { position: fixed; inset: 0; }
 #root.closing > * { animation: fadeOut .15s forwards; }
 @keyframes fadeOut { to { opacity: 0; } }
+/* Animations d'entrée figées sur leur première image tant que la fenêtre n'a rien affiché : elles
+   démarrent avec la première image réellement présentée (sinon le panneau apparaissait déjà à moitié
+   entré, d'où un à-coup à l'ouverture). */
+#root:not(.in) * { animation-play-state: paused !important; }
 
 /* ---- Menu rapide (bouton Xbox) ---- */
-.dim { position: absolute; inset: 0; background: rgba(2, 4, 9, .55); animation: fadeIn .18s var(--ease); }
+.dim { position: absolute; inset: 0; background: rgba(2, 4, 9, .55); animation: fadeIn .16s ease-out both; }
 .qm { position: absolute; top: 0; bottom: 0; left: 0; width: 34rem; padding: 2.4rem 2rem 2rem;
   background: linear-gradient(180deg, rgba(15, 20, 36, .97), rgba(9, 12, 24, .97));
   box-shadow: 1.5rem 0 4rem rgba(0, 0, 0, .55), inset -1px 0 0 var(--line);
-  display: flex; flex-direction: column; animation: slideIn .26s var(--ease-out); }
-@keyframes slideIn { from { transform: translateX(-100%); } to { transform: none; } }
+  display: flex; flex-direction: column; animation: slideIn .2s var(--ease-out) both; }
+@keyframes slideIn { from { transform: translateX(-3rem); opacity: 0; } to { transform: none; opacity: 1; } }
 .qm-head { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
 .qm-head .app-ic { width: 3.4rem; height: 3.4rem; border-radius: 1rem; display: grid; place-items: center;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); }

@@ -14,14 +14,28 @@ const KIND = {
 Shell.on('open', ({ mode, data, settings }) => {
   O.mode = mode; O.data = data || {}; O.settings = settings || {}; O.i = 0; O.sub = null;
   Sound.enabled = O.settings.ui_sounds !== false;
-  root.classList.remove('closing');
+  root.classList.remove('closing', 'in');
   root.innerHTML = '';     // nouvelle ouverture : on repart d'un écran vide (animations d'entrée)
   if (mode === 'menu') { O.volume = (O.data.volume || {}).volume; Sound.select(); }
   render();
+  // Deux images plus tard, la fenêtre a réellement affiché l'état de départ : les animations démarrent.
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('in')));
 });
 Shell.on('close', () => {
   root.classList.add('closing');
-  setTimeout(() => { if (root.classList.contains('closing')) { root.innerHTML = ''; O.mode = null; root.classList.remove('closing'); } }, 150);
+  setTimeout(() => {
+    if (!root.classList.contains('closing')) return;          // rouvert entre-temps
+    root.innerHTML = ''; O.mode = null; root.classList.remove('closing');
+    Sound.sleep();                                             // plus de son à jouer pendant le jeu
+    // Une image vide affichée → la surface peut être garée sans garder une trace du menu.
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (!O.mode) Shell.send('panel-closed'); }));
+  }, 150);
+});
+// Volume lu en arrière-plan à l'ouverture du menu (le menu s'ouvre sans l'attendre).
+Shell.on('volume', v => {
+  if (!v || v.volume == null) return;
+  O.volume = v.volume;
+  if (O.mode === 'menu') renderMenu();
 });
 Shell.on('pad', ev => handle(ev.button));
 Shell.on('splash-update', d => {
