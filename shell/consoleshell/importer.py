@@ -29,11 +29,18 @@ from .util import log
 
 TO_SORT = os.path.join(ROMS_DIR, "_À trier")
 WORK_DIR = os.path.join(XDG_CACHE, "console", "import")
-SYSTEM_NAMES = {"gba": "Game Boy Advance", "nds": "Nintendo DS", "n3ds": "Nintendo 3DS", "gc": "GameCube",
-                "wii": "Wii", "psx": "PlayStation", "ps2": "PlayStation 2"}
+SYSTEM_NAMES = {"nes": "NES", "snes": "Super Nintendo", "n64": "Nintendo 64", "gb": "Game Boy",
+                "gbc": "Game Boy Color", "gba": "Game Boy Advance", "nds": "Nintendo DS", "n3ds": "Nintendo 3DS",
+                "gc": "GameCube", "wii": "Wii", "mastersystem": "Master System", "megadrive": "Mega Drive",
+                "gamegear": "Game Gear", "psx": "PlayStation", "ps2": "PlayStation 2"}
 
 # Extensions qui suffisent à reconnaître le système
 EXT_SYSTEM = {
+    ".nes": "nes", ".fds": "nes", ".unf": "nes", ".unif": "nes",
+    ".sfc": "snes", ".smc": "snes", ".swc": "snes", ".fig": "snes",
+    ".z64": "n64", ".n64": "n64", ".v64": "n64", ".ndd": "n64",
+    ".gb": "gb", ".sgb": "gb", ".gbc": "gbc", ".cgb": "gbc",
+    ".sms": "mastersystem", ".md": "megadrive", ".gen": "megadrive", ".smd": "megadrive", ".gg": "gamegear",
     ".gba": "gba", ".agb": "gba",
     ".nds": "nds", ".dsi": "nds", ".ids": "nds",
     ".3ds": "n3ds", ".cci": "n3ds", ".cxi": "n3ds", ".3dsx": "n3ds", ".z3dsx": "n3ds", ".zcci": "n3ds",
@@ -52,9 +59,13 @@ UNSUPPORTED = {
     ".nsp": "jeu Switch : pas pris en charge", ".xci": "jeu Switch : pas pris en charge",
 }
 # Sans rapport avec un jeu : ignoré sans bruit
-JUNK = {".txt", ".nfo", ".diz", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".pdf", ".url", ".htm",
-        ".html", ".sfv", ".md5", ".sha1", ".dat", ".xml", ".ini", ".cfg", ".log", ".db", ".lnk", ".exe",
-        ".dll", ".msi", ".bat", ".sh", ".ds_store", ".torrent", ".srm", ".sav", ".mp4", ".mkv", ".mp3"}
+JUNK = {".txt", ".nfo", ".diz", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".heic", ".svg", ".pdf",
+        ".url", ".htm", ".html", ".sfv", ".md5", ".sha1", ".dat", ".xml", ".ini", ".cfg", ".log", ".db", ".lnk",
+        ".exe", ".dll", ".msi", ".bat", ".sh", ".ds_store", ".torrent", ".srm", ".sav", ".state", ".mp4",
+        ".mkv", ".avi", ".mov", ".wmv", ".webm", ".m4v", ".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac",
+        ".wma", ".doc", ".docx", ".odt", ".rtf", ".xls", ".xlsx", ".ods", ".csv", ".ppt", ".pptx", ".odp",
+        ".json", ".yml", ".yaml", ".md", ".py", ".js", ".css", ".epub", ".apk", ".deb", ".rpm", ".dmg",
+        ".pkg", ".msu", ".pcm", ".srt", ".ass", ".ico", ".icns", ".tmp", ".bak", ".part", ".crdownload"}
 SKIP_DIRS = {"system volume information", "$recycle.bin", "lost+found", ".trashes", ".spotlight-v100",
              ".fseventsd", ".trash-1000", "__macosx"}
 MULTI_DISC = {"psx", "gc", "wii"}                             # émulateurs qui gèrent les .m3u
@@ -196,6 +207,10 @@ def disc_system(path):
         return nintendo_disc(path) or ("ps2" if ext == ".ciso" else None)
     if ext == ".chd":
         return chd_system(path)
+    if ext == ".bin" and _read(path, 0x100, 4) == b"SEGA":   # « SEGA MEGA DRIVE » / « SEGA GENESIS »
+        return "megadrive"
+    if ext == ".bin" and _read(path, 0, 4) in (b"\x80\x37\x12\x40", b"\x37\x80\x40\x12", b"\x40\x12\x37\x80"):
+        return "n64"                                          # en-tête N64 (z64, v64, n64)
     if ext in (".iso", ".img", ".mdf", ".bin"):
         return (nintendo_disc(path) if ext == ".iso" else None) or playstation_disc(path)
     return None
@@ -435,6 +450,10 @@ def plan(root):
             items.append(Item("game", os.path.splitext(name)[0], [f], system=system))
         elif ext in CONTENT or ext in (".elf", ".app", ".dol", ".mds", ".gz", ".sub"):
             items.append(Item("to_sort", name, [f], note="pas reconnu"))
+        elif ext and len(ext) <= 6 and os.path.getsize(f) >= 4096:
+            # Extension inconnue : peut-être un jeu d'une console pas encore prise en charge. Mieux vaut
+            # le garder de côté (et le dire) que de l'écarter sans prévenir.
+            items.append(Item("to_sort", name, [f], note=f"format {ext} pas pris en charge"))
         else:
             items.append(Item("ignored", name, [f]))
 

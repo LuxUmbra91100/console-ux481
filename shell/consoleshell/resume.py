@@ -44,8 +44,58 @@ FLATPAK_ROOTS = ("/var/lib/flatpak/app", os.path.join(HOME, ".local/share/flatpa
 KEEP = 300
 
 
+PCSX2_INI = os.path.join(VAR, FLATPAKS["pcsx2"], "config/PCSX2/inis/PCSX2.ini")
+
+
+def _settings():
+    return read_json(SETTINGS_PATH, {}) or {}
+
+
 def enabled():
-    return (read_json(SETTINGS_PATH, {}) or {}).get("resume_games", True) is not False
+    return _settings().get("resume_games", True) is not False
+
+
+def ini_value(path, section, key, value):
+    """Écrit « clé = valeur » dans une section d'un .ini (PCSX2) ; True si le fichier a changé."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return False
+    out, in_section, done, changed = [], False, False, False
+    wanted = f"{key} = {value}"
+    for line in lines:
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]"):
+            if in_section and not done:
+                out.append(wanted)
+                done = changed = True
+            in_section = s[1:-1] == section
+        elif in_section and not done and re.match(rf"\s*{re.escape(key)}\s*=", line):
+            changed |= s != wanted
+            out.append(wanted)
+            done = True
+            continue
+        out.append(line)
+    if not done:
+        if not in_section:
+            out += ["", f"[{section}]"]
+        out.append(wanted)
+        changed = True
+    if changed:
+        atomic_write(path, "\n".join(out) + "\n")
+    return changed
+
+
+def display_args(emu, settings=None):
+    """Format d'image (Réglages › Jeux) : « auto » = 16:9 quand le jeu le permet (la Wii est mise en
+    16:9), « fill » = image étirée sur tout l'écran."""
+    fill = (settings or _settings()).get("emu_aspect") == "fill"
+    if emu == "dolphin":
+        return ["-C", "SYSCONF.IPL.AR=True", "-C", f"Graphics.Settings.AspectRatio={3 if fill else 0}"]
+    if emu == "pcsx2":
+        ini_value(PCSX2_INI, "EmuCore/GS", "AspectRatio", "Stretch" if fill else "Auto 4:3/3:2")
+    return []
 
 
 def build(emu):
@@ -179,9 +229,11 @@ def retroarch_config(on, path=RA_CFG):
 
 def command(emu, args, on=None):
     """(commande à lancer, jeu, état rechargé, recharger par raccourci après le lancement)."""
-    on = enabled() if on is None else on
+    settings = _settings()
+    on = (settings.get("resume_games", True) is not False) if on is None else on
     rom = find_rom(args)
     extra, state, hotkey = [], None, False
+    display = display_args(emu, settings)
     if emu == "retroarch":
         retroarch_config(on)
     elif on and rom:
@@ -192,7 +244,7 @@ def command(emu, args, on=None):
             extra = ["-statefile", state]
         elif state and emu == "azahar":
             hotkey = True
-    return ["flatpak", "run", FLATPAKS[emu]] + extra + list(args), rom, state, hotkey
+    return ["flatpak", "run", FLATPAKS[emu]] + display + extra + list(args), rom, state, hotkey
 
 
 def after_exit(emu, rom, started, loaded_state, ran_for):

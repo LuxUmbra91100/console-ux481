@@ -86,7 +86,8 @@
       <input type="file" id="files" multiple class="hidden">
       <input type="file" id="dir" webkitdirectory multiple class="hidden">
     </div>
-    <p class="hint">GBA, DS, 3DS, GameCube, Wii, PS1, PS2 · <b>.zip</b> et <b>.7z</b> décompressés tout seuls ·
+    <p class="hint">NES, Super Nintendo, N64, Game Boy (Color, Advance), DS, 3DS, GameCube, Wii, Master System,
+      Mega Drive, Game Gear, PS1, PS2 · <b>.zip</b> et <b>.7z</b> décompressés tout seuls ·
       <b>.cue</b> avec leurs <b>.bin</b>, jeux sur plusieurs disques regroupés · BIOS reconnus quel que soit leur nom.</p>
     <div class="total hidden" id="total"><span id="totalText"></span><span id="totalPct"></span></div>
     <div class="list" id="list"></div>
@@ -97,7 +98,8 @@
 <script>
 'use strict';
 const $ = s => document.querySelector(s);
-const SYS = { gba: 'GBA', nds: 'DS', n3ds: '3DS', gc: 'GameCube', wii: 'Wii', psx: 'PS1', ps2: 'PS2' };
+const SYS = { nes: 'NES', snes: 'SNES', n64: 'N64', gb: 'Game Boy', gbc: 'Game Boy Color', gba: 'GBA', nds: 'DS', n3ds: '3DS',
+  gc: 'GameCube', wii: 'Wii', mastersystem: 'Master System', megadrive: 'Mega Drive', gamegear: 'Game Gear', psx: 'PS1', ps2: 'PS2' };
 const IGNORE = /^(\.|_\.|thumbs\.db$|desktop\.ini$)/i;
 let token = new URLSearchParams(location.search).get('k') || sessionStorage.getItem('k') || '';
 if (new URLSearchParams(location.search).get('k')) history.replaceState(null, '', '/');
@@ -243,7 +245,7 @@ function show(results) {
   if (added.length) html += `<h2>✓ ${added.length} jeu${added.length > 1 ? 'x' : ''} ajouté${added.length > 1 ? 's' : ''}</h2>` + added.map(r => line(SYS[r.system] || r.system, 'ok', r.label)).join('');
   if (bios.length) html += '<h2>BIOS</h2>' + bios.map(r => line('BIOS', 'bios', r.label, r.status === 'present' ? 'déjà sur la console' : '')).join('');
   if (present.length) html += '<h2>Déjà sur la console</h2>' + present.map(r => line(SYS[r.system] || r.system, '', r.label)).join('');
-  if (sort.length) html += '<h2>Pas reconnus</h2>' + sort.map(r => line('À trier', 'warn', r.label, 'gardé dans le dossier « _À trier » du partage Jeux')).join('');
+  if (sort.length) html += '<h2>Pas reconnus</h2>' + sort.map(r => line('À trier', 'warn', r.label, (r.note ? r.note + ' · ' : '') + 'gardé dans le dossier « _À trier » du partage Jeux')).join('');
   if (bad.length) html += '<h2>Problèmes</h2>' + bad.map(r => line('!', 'bad', r.label, r.note)).join('');
   if (ignored) html += `<p class="hint">${ignored} fichier${ignored > 1 ? 's' : ''} sans rapport ignoré${ignored > 1 ? 's' : ''} (textes, images…).</p>`;
   if (!html) html = '<p class="hint">Rien à ranger.</p>';

@@ -34,6 +34,14 @@ SERVER = "https://thumbnails.libretro.com"
 GITHUB_RAW = "https://raw.githubusercontent.com/libretro-thumbnails"
 GITHUB_API = "https://api.github.com/repos/libretro-thumbnails"
 SYSTEM_NAMES = {
+    "nes": "Nintendo - Nintendo Entertainment System",
+    "snes": "Nintendo - Super Nintendo Entertainment System",
+    "n64": "Nintendo - Nintendo 64",
+    "gb": "Nintendo - Game Boy",
+    "gbc": "Nintendo - Game Boy Color",
+    "mastersystem": "Sega - Master System - Mark III",
+    "megadrive": "Sega - Mega Drive - Genesis",
+    "gamegear": "Sega - Game Gear",
     "gba": "Nintendo - Game Boy Advance",
     "nds": "Nintendo - Nintendo DS",
     "n3ds": "Nintendo - Nintendo 3DS",

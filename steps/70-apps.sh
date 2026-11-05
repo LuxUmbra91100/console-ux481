@@ -36,7 +36,7 @@ ok "Accès des émulateurs à ~/ROMs et ~/BIOS"
 cores_dir="$CONSOLE_HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
 as_user mkdir -p "$cores_dir"
 tmp=$(mktemp -d)
-for core in mgba melondsds mednafen_psx_hw swanstation; do
+for core in mgba melondsds mednafen_psx_hw swanstation mesen snes9x mupen64plus_next gambatte genesis_plus_gx; do
   url="https://buildbot.libretro.com/nightly/linux/x86_64/latest/${core}_libretro.so.zip"
   if download "$url" "$tmp/$core.zip" && unzip -o -q "$tmp/$core.zip" -d "$tmp"; then
     install -o "$CONSOLE_USER" -g "$CONSOLE_GROUP" -m 0644 "$tmp/${core}_libretro.so" "$cores_dir/"

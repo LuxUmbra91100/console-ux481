@@ -59,8 +59,18 @@ ok "Service utilisateur console-shell activé"
 
 # --- Dossiers de l'utilisateur ------------------------------------------------------
 declare -A SYSNAMES=([gba]="Game Boy Advance" [nds]="Nintendo DS" [n3ds]="Nintendo 3DS" \
-  [gc]="GameCube" [wii]="Wii" [psx]="PlayStation" [ps2]="PlayStation 2")
+  [gc]="GameCube" [wii]="Wii" [psx]="PlayStation" [ps2]="PlayStation 2" [nes]="NES" [snes]="Super Nintendo" \
+  [n64]="Nintendo 64" [gb]="Game Boy" [gbc]="Game Boy Color" [mastersystem]="Master System" \
+  [megadrive]="Mega Drive" [gamegear]="Game Gear")
 declare -A SYSHINT=(
+  [nes]=".nes (ou .zip)"
+  [snes]=".sfc ou .smc (ou .zip)"
+  [n64]=".z64, .n64 ou .v64 (ou .zip)"
+  [gb]=".gb (ou .zip)"
+  [gbc]=".gbc (ou .zip)"
+  [mastersystem]=".sms (ou .zip)"
+  [megadrive]=".md, .gen, .smd ou .bin (ou .zip)"
+  [gamegear]=".gg (ou .zip)"
   [gba]=".gba (ou .zip)"
   [nds]=".nds (ou .zip)"
   [n3ds]=".3ds / .cci DÉCRYPTÉS (GodMode9 sur ta 3DS), ou .zcci ; les .cia doivent d'abord être installés dans Azahar"
@@ -87,4 +97,4 @@ Dépose ici les BIOS extraits de TES consoles (tous dans ce même dossier) :
   - Nintendo DS (facultatif) : bios7.bin, bios9.bin, firmware.bin
 Les noms et sommes de contrôle attendus sont détaillés dans le README de console-ux481.
 EOF
-ok "Dossiers ~/ROMs (gba nds n3ds gc wii psx ps2), ~/BIOS et ~/Captures prêts"
+ok "Dossiers ~/ROMs (une console par dossier), ~/BIOS et ~/Captures prêts"

@@ -14,7 +14,8 @@ pilotée uniquement à la **manette Xbox**, réveillée en allumant la manette.
   réveillé automatiquement (Wake-on-LAN) s'il dort.
 - **PC distant** (Tailscale) : réveil par un relais toujours allumé (Raspberry…), Sunshine
   relancé tout seul quand il se bloque, veille / redémarrage / arrêt du PC depuis la console.
-- **Émulation** GBA, DS, 3DS, GameCube, Wii, PS1, PS2 via **ES-DE** et des émulateurs
+- **Émulation** NES, Super Nintendo, N64, Game Boy (Color, Advance), DS, 3DS, GameCube, Wii,
+  Master System, Mega Drive, Game Gear, PS1, PS2 via **ES-DE** et des émulateurs
   préréglés pour la manette et la TV. **Ajout des jeux et BIOS en vrac** depuis le téléphone
   (QR code) ou une clé USB, rangés automatiquement ; **jaquettes ajoutées toutes seules** et
   **reprise des parties là où tu t'étais arrêté**.
@@ -309,12 +310,17 @@ rapport (textes, images…) sont ignorés. Un jeu déjà présent n'est pas copi
 
 | Dossier | Console | Formats conseillés | Émulateur |
 |---|---|---|---|
+| `nes` | NES | `.nes` | RetroArch (Mesen) |
+| `snes` | Super Nintendo | `.sfc`, `.smc` | RetroArch (Snes9x) |
+| `n64` | Nintendo 64 | `.z64`, `.n64`, `.v64` | RetroArch (Mupen64Plus-Next) |
+| `gb`, `gbc` | Game Boy, Game Boy Color | `.gb`, `.gbc` | RetroArch (Gambatte) |
 | `gba` | Game Boy Advance | `.gba` | RetroArch (mGBA) |
 | `nds` | Nintendo DS | `.nds` | RetroArch (melonDS DS) |
 | `n3ds` | Nintendo 3DS | `.3ds`/`.cci` **décryptés**, `.zcci` | Azahar |
 | `gc` | GameCube | `.rvz`, `.iso` | Dolphin |
 | `wii` | Wii | `.rvz`, `.wbfs` | Dolphin |
 | `psx` | PlayStation | `.chd`, `.cue`+`.bin`, `.m3u` | RetroArch (Beetle PSX HW) |
+| `mastersystem`, `megadrive`, `gamegear` | Master System, Mega Drive, Game Gear | `.sms`, `.md`/`.gen`/`.bin`, `.gg` | RetroArch (Genesis Plus GX) |
 | `ps2` | PlayStation 2 | `.chd`, `.iso` | PCSX2 |
 
 **BIOS** (extraits de tes consoles). Envoyés par le QR code ou une clé USB, ils sont reconnus
@@ -341,6 +347,9 @@ tes jeux).
   *Jeux* (ES-DE), ≡ › *Scraper* avec un compte gratuit screenscraper.fr.
 - La manette est configurée d'office dans tous les émulateurs, y compris Dolphin
   (GameCube, et Wiimote + Nunchuk pour la Wii : stick droit = pointeur, R3 = recentrer).
+- **Format d'image** (*Réglages › Jeux › Image*) : « Automatique » affiche les jeux Wii en 16:9
+  (et les jeux GameCube/PS2 prévus pour) sans les déformer, avec des bandes noires sur les côtés
+  pour les jeux en 4:3 ; « Remplir l'écran » étire l'image sur toute la TV (Dolphin et PCSX2).
 - Pendant un jeu : bouton Xbox › **Sauvegarder / Charger l'état**, **Quitter le jeu**.
   Dans RetroArch, maintenir Start 2 s ouvre son propre menu (shaders, options).
 

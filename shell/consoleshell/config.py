@@ -58,6 +58,7 @@ DEFAULTS = {
     "covers_auto": True,                        # jaquettes manquantes téléchargées (base libretro)
     "resume_games": True,                       # parties mises de côté en quittant, reprises au lancement
     "usb_import": True,                         # proposer d'importer les jeux d'une clé USB branchée
+    "emu_aspect": "auto",                       # auto (16:9 si le jeu le permet) | fill (étirer à l'écran)
 }
 
 

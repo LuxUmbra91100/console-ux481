@@ -17,11 +17,19 @@ RA_CORES = os.path.join(HOME, ".var/app/org.libretro.RetroArch/config/retroarch/
 
 # (id ES-DE, nom, sigle, couleur d'accent, extensions)
 SYSTEMS = [
+    ("nes", "NES", "NES", "#e0393e", ".fds .nes .unf .unif .7z .zip"),
+    ("snes", "Super Nintendo", "SNES", "#8a74d6", ".bin .bs .fig .sfc .smc .swc .7z .zip"),
+    ("n64", "Nintendo 64", "N64", "#2fa84f", ".bin .n64 .ndd .v64 .z64 .7z .zip"),
+    ("gb", "Game Boy", "GB", "#8bac0f", ".gb .sgb .7z .zip"),
+    ("gbc", "Game Boy Color", "GBC", "#d1365d", ".gbc .cgb .7z .zip"),
     ("gba", "Game Boy Advance", "GBA", "#7b5cff", ".agb .bin .gba .7z .zip"),
     ("nds", "Nintendo DS", "DS", "#9aa4b5", ".app .bin .dsi .ids .nds .7z .zip"),
     ("n3ds", "Nintendo 3DS", "3DS", "#e5383b", ".3ds .3dsx .app .axf .cci .cxi .elf .z3dsx .zcci .zcxi .7z .zip"),
     ("gc", "GameCube", "GC", "#6c4ee0", ".ciso .dol .elf .gcm .gcz .iso .m3u .rvz .tgc .wbfs .wia"),
     ("wii", "Wii", "Wii", "#3fb6e8", ".ciso .dol .elf .gcm .gcz .iso .m3u .rvz .tgc .wad .wbfs .wia"),
+    ("mastersystem", "Master System", "SMS", "#c0392b", ".bin .sms .7z .zip"),
+    ("megadrive", "Mega Drive", "MD", "#4b5d78", ".bin .gen .md .smd .7z .zip"),
+    ("gamegear", "Game Gear", "GG", "#5c6b7a", ".gg .7z .zip"),
     ("psx", "PlayStation", "PS1", "#b0b4bd", ".bin .cbn .ccd .chd .cue .ecm .exe .img .iso .m3u .mdf .mds .pbp .toc .7z .zip"),
     ("ps2", "PlayStation 2", "PS2", "#2f6bff", ".bin .chd .ciso .cso .elf .gz .m3u .mdf .img .iso .isz .zso"),
 ]
@@ -29,7 +37,14 @@ SYSTEM_INDEX = {s[0]: s for s in SYSTEMS}
 
 # Commandes de lancement direct (mêmes émulateurs que dans ES-DE), via console-emu pour la reprise.
 EMU = os.path.join(BIN_DIR, "console-emu")
+def _ra(core):
+    return lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/{core}_libretro.so", rom]
+
+
 COMMANDS = {
+    "nes": _ra("mesen"), "snes": _ra("snes9x"), "n64": _ra("mupen64plus_next"),
+    "gb": _ra("gambatte"), "gbc": _ra("gambatte"),
+    "mastersystem": _ra("genesis_plus_gx"), "megadrive": _ra("genesis_plus_gx"), "gamegear": _ra("genesis_plus_gx"),
     "gba": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/mgba_libretro.so", rom],
     "nds": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/melondsds_libretro.so", rom],
     "psx": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/mednafen_psx_hw_libretro.so", rom],
@@ -40,6 +55,9 @@ COMMANDS = {
 }
 # Libellés ES-DE compatibles avec le lancement direct.
 SUPPORTED_LABELS = {
+    "nes": {"Mesen"}, "snes": {"Snes9x - Current"}, "n64": {"Mupen64Plus-Next"},
+    "gb": {"Gambatte"}, "gbc": {"Gambatte"},
+    "mastersystem": {"Genesis Plus GX"}, "megadrive": {"Genesis Plus GX"}, "gamegear": {"Genesis Plus GX"},
     "gba": {"mGBA"}, "nds": {"melonDS DS"}, "psx": {"Beetle PSX HW"},
     "gc": {"Dolphin (Standalone)"}, "wii": {"Dolphin (Standalone)"},
     "ps2": {"PCSX2 (Standalone)"}, "n3ds": {"Azahar (Standalone)"},

@@ -659,6 +659,11 @@ class SettingsLayer extends Layer {
       out.push({ group: 'Ajouter des jeux et des BIOS' });
       out.push({ icon: 'plus', title: 'Depuis un téléphone ou un PC', sub: 'Un QR code à scanner : envoie tout en vrac, la console range', act: () => { this.close(); openUpload(); } });
       out.push(toggleRow('folder', 'Depuis une clé USB', 'Proposer d\'importer les jeux et BIOS d\'une clé ou d\'un disque dès qu\'il est branché', 'usb_import'));
+      out.push({ group: 'Image' });
+      out.push(choiceRow('display', 'Format d\'image (GameCube, Wii, PS2)', s.emu_aspect === 'fill'
+        ? 'Image étirée sur tout l\'écran : plus de bandes noires, les jeux 4:3 sont un peu élargis'
+        : '16:9 quand le jeu le permet (Wii comprise), sinon bandes noires sur les côtés',
+        'emu_aspect', [['auto', 'Automatique'], ['fill', 'Remplir l\'écran']]));
       out.push({ group: 'BIOS' });
       biosRows(this.bios, out, () => { this.close(); openUpload(); });
       out.push({ group: 'Jaquettes' });
@@ -930,7 +935,8 @@ const Ambient = {
 setInterval(() => Ambient.check(), 5000);
 
 /* -------------------------------------------------------- Ajout de jeux --- */
-const SYS_SHORT = { gba: 'GBA', nds: 'DS', n3ds: '3DS', gc: 'GameCube', wii: 'Wii', psx: 'PS1', ps2: 'PS2' };
+const SYS_SHORT = { nes: 'NES', snes: 'SNES', n64: 'N64', gb: 'GB', gbc: 'GBC', gba: 'GBA', nds: 'DS', n3ds: '3DS', gc: 'GameCube',
+  wii: 'Wii', mastersystem: 'Master System', megadrive: 'Mega Drive', gamegear: 'Game Gear', psx: 'PS1', ps2: 'PS2' };
 const gbSize = n => n >= 1e9 ? `${(n / 1e9).toFixed(1).replace('.', ',')} Go` : `${Math.max(1, Math.round(n / 1e6))} Mo`;
 
 // Écran « Ajouter des jeux » : QR code à scanner, adresse et code pour un ordinateur, arrivées en direct.

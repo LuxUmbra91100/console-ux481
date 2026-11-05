@@ -748,9 +748,11 @@ class ResumeTests(unittest.TestCase):
         st = self._state("dolphin", "GZLP01.s08")
         r.record(gc, "dolphin", st)
         cmd = r.command("dolphin", ["-b", "-e", gc], on=True)[0]
-        self.assertEqual(cmd, ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-s", st, "-b", "-e", gc])
+        self.assertEqual(cmd, ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-C", "SYSCONF.IPL.AR=True",
+                               "-C", "Graphics.Settings.AspectRatio=0", "-s", st, "-b", "-e", gc])
         self._build("dolphin", "d2")                     # mis à jour : Dolphin ignorera l'état s'il est trop vieux
-        self.assertEqual(r.command("dolphin", ["-b", "-e", gc], on=True)[0][3:5], ["-s", st])
+        cmd = r.command("dolphin", ["-b", "-e", gc], on=True)[0]
+        self.assertEqual(cmd[cmd.index("-s") + 1], st)
         ds = os.path.join(TMP_HOME, "Reprise", "n3ds", "Zelda.3ds")
         os.makedirs(os.path.dirname(ds), exist_ok=True)
         open(ds, "w").close()
@@ -759,6 +761,24 @@ class ResumeTests(unittest.TestCase):
         cmd, _, _, hotkey = r.command("azahar", ["-f", ds], on=True)
         self.assertEqual(cmd, ["flatpak", "run", "org.azahar_emu.Azahar", "-f", ds])  # pas d'option : raccourci
         self.assertTrue(hotkey)
+
+    def test_aspect_setting(self):
+        """Réglages › Jeux › Format d'image : Wii toujours en 16:9, « Remplir l'écran » étire (Dolphin, PCSX2)."""
+        r = self.resume
+        self.assertIn("Graphics.Settings.AspectRatio=3", r.display_args("dolphin", {"emu_aspect": "fill"}))
+        self.assertIn("SYSCONF.IPL.AR=True", r.display_args("dolphin", {}))
+        os.makedirs(os.path.dirname(r.PCSX2_INI), exist_ok=True)
+        with open(r.PCSX2_INI, "w", encoding="utf-8") as f:
+            f.write("[UI]\nStartFullscreen = true\n\n[EmuCore/GS]\nRenderer = 14\nAspectRatio = Auto 4:3/3:2\n\n[Pad1]\nType = DualShock2\n")
+        r.display_args("pcsx2", {"emu_aspect": "fill"})
+        with open(r.PCSX2_INI, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("[EmuCore/GS]\nRenderer = 14\nAspectRatio = Stretch\n", text)
+        self.assertIn("[Pad1]\nType = DualShock2", text)
+        self.assertFalse(r.ini_value(r.PCSX2_INI, "EmuCore/GS", "AspectRatio", "Stretch"))   # déjà bon : pas réécrit
+        r.ini_value(r.PCSX2_INI, "EmuCore", "SaveStateOnShutdown", "true")                  # section absente : ajoutée
+        with open(r.PCSX2_INI, encoding="utf-8") as f:
+            self.assertTrue(f.read().endswith("[EmuCore]\nSaveStateOnShutdown = true\n"))
 
     def test_after_exit_records_newest_state_and_forgets_refused_one(self):
         r = self.resume
@@ -894,6 +914,22 @@ class ImporterTests(unittest.TestCase):
         cd = bytes(head) + b"CHT2\x01\x00\x00\x10" + b"\0" * 8
         self.assertEqual(imp.disc_system(self.put("a/God of War.chd", dvd)), "ps2")
         self.assertEqual(imp.disc_system(self.put("a/Crash.chd", cd)), "psx")
+
+    def test_retro_consoles(self):
+        imp = self.imp
+        md = bytearray(0x200); md[0x100:0x110] = b"SEGA MEGA DRIVE "
+        cases = {"Chrono Trigger (USA).sfc": (b"\0" * 9000, "snes"), "Super Mario 64 (Europe).z64": (b"\x80\x37\x12\x40" + b"\0" * 9000, "n64"),
+                 "Rayman 2 (Europe).bin": (b"\x80\x37\x12\x40" + b"\0" * 9000, "n64"), "Sonic (Europe).bin": (bytes(md), "megadrive"),
+                 "Zelda (France).nes": (b"NES\x1a" + b"\0" * 9000, "nes"), "Pokemon Jaune (France).gb": (b"\0" * 9000, "gb"),
+                 "Wario Land 3.gbc": (b"\0" * 9000, "gbc"), "Alex Kidd.sms": (b"\0" * 9000, "mastersystem")}
+        for name, (data, system) in cases.items():
+            self.assertEqual(imp.disc_system(self.put("r/" + name, data)), system, name)
+        self.put("r/Inconnu.a26", b"\0" * 9000)                            # console pas prise en charge
+        self.put("r/Musique.flac", b"\0" * 9000)
+        items = {it.label: it for it in imp.plan(os.path.join(self.root, "r"))}
+        self.assertEqual(items["Inconnu.a26"].kind, "to_sort")              # gardé de côté, et signalé
+        self.assertIn(".a26", items["Inconnu.a26"].note)
+        self.assertEqual(items["Musique.flac"].kind, "ignored")
 
     def test_bios_recognized_whatever_their_name(self):
         imp = self.imp
