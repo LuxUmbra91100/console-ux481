@@ -763,6 +763,28 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(cmd, ["flatpak", "run", "org.azahar_emu.Azahar", "-f", ds])  # pas d'option : raccourci
         self.assertTrue(hotkey)
 
+    def test_n64_resume_is_deferred(self):
+        """Mupen64Plus-Next rate le chargement auto au démarrage : la console le fait plus tard (touche)."""
+        r = self.resume
+        rom = os.path.join(TMP_HOME, "Reprise", "n64", "Super Mario 64 (Europe) (En,Fr,De).z64")
+        os.makedirs(os.path.dirname(rom), exist_ok=True)
+        open(rom, "w").close()
+        core = "/home/x/.var/app/org.libretro.RetroArch/config/retroarch/cores/mupen64plus_next_libretro.so"
+        cmd, _, _, hotkey = r.command("retroarch", ["-L", core, rom], on=True)
+        self.assertFalse(hotkey)                                            # rien à reprendre encore
+        self.assertIn("--verbose", cmd)
+        override = os.path.join(r.RA_DIR, "config", "Mupen64Plus-Next", "Mupen64Plus-Next.cfg")
+        with open(override, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\n')
+        auto = os.path.join(r.RA_DIR, "states", "Mupen64Plus-Next", os.path.basename(rom)[:-4] + ".state.auto")
+        os.makedirs(os.path.dirname(auto), exist_ok=True)
+        open(auto, "w").close()
+        self.assertTrue(r.command("retroarch", ["-L", core, rom], on=True)[3])
+        self.assertFalse(r.command("retroarch", ["-L", core, rom], on=False)[3])
+        mgba = core.replace("mupen64plus_next", "mgba")
+        self.assertFalse(r.command("retroarch", ["-L", mgba, rom], on=True)[3])  # les autres cœurs : RetroArch seul
+        self.assertEqual(r.LOAD_KEYS["retroarch"], ["KEY_F4"])
+
     def test_aspect_setting(self):
         """Réglages › Jeux › Format d'image : Wii toujours en 16:9, « Remplir l'écran » étire (Dolphin, PCSX2)."""
         r = self.resume

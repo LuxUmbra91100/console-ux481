@@ -362,7 +362,8 @@ comme depuis ES-DE, elle reprend exactement là. Sur l'accueil, le jeu affiche a
 
 | Émulateur | Comment |
 |---|---|
-| RetroArch (GBA, DS, PS1) | sauvegarde et rechargement automatiques de RetroArch |
+| RetroArch (NES, SNES, GB, GBA, DS, Sega, PS1) | sauvegarde et rechargement automatiques de RetroArch |
+| RetroArch (N64) | sauvegarde automatique ; rechargée 6 s après le lancement (le cœur N64 rate le chargement immédiat) |
 | PCSX2 (PS2) | état de reprise écrit par PCSX2 en quittant, redonné au lancement |
 | Dolphin (GameCube, Wii) | la console enregistre l'emplacement 8 (Maj+F8) avant de quitter |
 | Azahar (3DS) | la console enregistre un état avant de quitter et le recharge 6 s après le lancement |

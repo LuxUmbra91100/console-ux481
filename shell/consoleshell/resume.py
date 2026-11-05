@@ -36,7 +36,11 @@ STATE_GLOBS = {
     "azahar": [os.path.join(VAR, FLATPAKS["azahar"], "data/azahar-emu/states/*.cst")],
 }
 SAVE_KEYS = {"dolphin": ["KEY_LEFTSHIFT", "KEY_F8"], "azahar": ["KEY_LEFTCTRL", "KEY_C"]}
-LOAD_KEYS = {"azahar": ["KEY_LEFTCTRL", "KEY_V"]}
+LOAD_KEYS = {"azahar": ["KEY_LEFTCTRL", "KEY_V"], "retroarch": ["KEY_F4"]}
+# Cœurs RetroArch qui ratent le chargement automatique au démarrage (Mupen64Plus-Next : écran noir) :
+# l'état « auto » leur est redonné par la touche « charger » une fois le jeu lancé. Nom du fichier du
+# cœur → nom du cœur pour RetroArch (dossier de ses réglages propres et de ses états).
+DEFERRED_CORES = {"mupen64plus_next": "Mupen64Plus-Next"}
 RESUME_PATH = os.path.join(STATE_DIR, "resume.json")
 RA_DIR = os.path.join(VAR, FLATPAKS["retroarch"], "config/retroarch")
 RA_CFG = os.path.join(RA_DIR, "retroarch.cfg")
@@ -230,6 +234,41 @@ def retroarch_config(on, path=RA_CFG):
     return changed
 
 
+def _core_of(args):
+    """Nom du fichier du cœur dans « -L …/xxx_libretro.so »."""
+    for i, a in enumerate(args[:-1]):
+        if a in ("-L", "--libretro"):
+            return os.path.basename(args[i + 1]).replace("_libretro.so", "")
+    return None
+
+
+def deferred_core_setup(core):
+    """Réglages propres au cœur : pas de chargement automatique au démarrage, et l'emplacement « auto »
+    pour la touche « charger » (celle qu'envoie la console quelques secondes après le lancement)."""
+    name = DEFERRED_CORES[core]
+    path = os.path.join(RA_DIR, "config", name, name + ".cfg")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        atomic_write(path, "")
+    for key, value in (("savestate_auto_load", '"false"'), ("state_slot", '"-1"')):
+        _cfg_line(path, key, value)
+    return name
+
+
+def _cfg_line(path, key, value):
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    wanted = f"{key} = {value}"
+    found = [i for i, ln in enumerate(lines) if re.match(rf"\s*{re.escape(key)}\s*=", ln)]
+    if found and lines[found[0]] == wanted:
+        return
+    if found:
+        lines[found[0]] = wanted
+    else:
+        lines.append(wanted)
+    atomic_write(path, "\n".join(lines) + "\n")
+
+
 def command(emu, args, on=None):
     """(commande à lancer, jeu, état rechargé, recharger par raccourci après le lancement)."""
     settings = _settings()
@@ -239,6 +278,11 @@ def command(emu, args, on=None):
     display = display_args(emu, settings) + (["--verbose"] if emu == "retroarch" else [])
     if emu == "retroarch":
         retroarch_config(on)
+        core = _core_of(args)
+        if core in DEFERRED_CORES:
+            deferred_core_setup(core)
+            if on and rom and _retroarch_auto_states(rom):
+                hotkey = True                  # la console envoie « charger » une fois le jeu à l'écran
     elif on and rom:
         state = state_for(rom, emu)
         if state and emu == "dolphin":

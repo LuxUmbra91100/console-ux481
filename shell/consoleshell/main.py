@@ -304,8 +304,8 @@ class Shell:
         next_app()
 
     def resume_load(self, emu):
-        """Azahar ne sait pas charger un état au lancement : on envoie « charger le plus récent » une
-        fois le jeu à l'écran depuis quelques secondes."""
+        """Azahar ne sait pas charger un état au lancement, et le cœur N64 de RetroArch le rate : on
+        envoie « charger » une fois le jeu à l'écran depuis quelques secondes."""
         combo = resume.LOAD_KEYS.get(emu)
         if not combo:
             return
