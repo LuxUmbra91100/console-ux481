@@ -398,6 +398,15 @@ côté avec une ancienne version peut ne pas reprendre (PCSX2 repart alors du d�
 | La console rame, plante ou le SSD fait des siennes | *Réglages › Santé* : état du SSD (SMART, erreurs d'accès), températures, mémoire, stockage, Tailscale, latence vers le PC, avec les alertes en tête. |
 | Moonlight : « PC injoignable » alors que le PC est allumé | Sunshine est sûrement bloqué : voir *PC dans une autre maison* (section 6), ou relance-le depuis la carte du PC. |
 
+Un jeu ou une image qui se comporte bizarrement : lance le jeu, puis en SSH (avec l'utilisateur
+de la console) la commande ci-dessous. Elle rassemble les écrans, la taille réelle de chaque
+fenêtre, les réglages des émulateurs et leurs derniers journaux (chaque lancement d'émulateur
+est noté dans `~/.local/state/console/logs/emu-*.log`, même depuis ES-DE) :
+
+```bash
+console-diag
+```
+
 Commandes utiles (en SSH, depuis la session de l'utilisateur) :
 
 ```bash

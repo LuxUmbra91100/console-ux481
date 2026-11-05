@@ -92,7 +92,10 @@ def display_args(emu, settings=None):
     16:9), « fill » = image étirée sur tout l'écran."""
     fill = (settings or _settings()).get("emu_aspect") == "fill"
     if emu == "dolphin":
-        return ["-C", "SYSCONF.IPL.AR=True", "-C", f"Graphics.Settings.AspectRatio={3 if fill else 0}"]
+        # Plein écran laissé à sway (comme pour toutes les applis) : le plein écran propre à Dolphin
+        # se calait mal sous XWayland (image décalée d'une demi-largeur).
+        return ["-C", "SYSCONF.IPL.AR=True", "-C", f"Graphics.Settings.AspectRatio={3 if fill else 0}",
+                "-C", "Dolphin.Display.Fullscreen=False"]
     if emu == "pcsx2":
         ini_value(PCSX2_INI, "EmuCore/GS", "AspectRatio", "Stretch" if fill else "Auto 4:3/3:2")
     return []
@@ -233,7 +236,7 @@ def command(emu, args, on=None):
     on = (settings.get("resume_games", True) is not False) if on is None else on
     rom = find_rom(args)
     extra, state, hotkey = [], None, False
-    display = display_args(emu, settings)
+    display = display_args(emu, settings) + (["--verbose"] if emu == "retroarch" else [])
     if emu == "retroarch":
         retroarch_config(on)
     elif on and rom:

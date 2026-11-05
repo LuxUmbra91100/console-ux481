@@ -749,7 +749,8 @@ class ResumeTests(unittest.TestCase):
         r.record(gc, "dolphin", st)
         cmd = r.command("dolphin", ["-b", "-e", gc], on=True)[0]
         self.assertEqual(cmd, ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-C", "SYSCONF.IPL.AR=True",
-                               "-C", "Graphics.Settings.AspectRatio=0", "-s", st, "-b", "-e", gc])
+                               "-C", "Graphics.Settings.AspectRatio=0", "-C", "Dolphin.Display.Fullscreen=False",
+                               "-s", st, "-b", "-e", gc])
         self._build("dolphin", "d2")                     # mis à jour : Dolphin ignorera l'état s'il est trop vieux
         cmd = r.command("dolphin", ["-b", "-e", gc], on=True)[0]
         self.assertEqual(cmd[cmd.index("-s") + 1], st)
@@ -840,6 +841,10 @@ class ResumeTests(unittest.TestCase):
         state = os.path.join(state_dir, "SLES-1 (0000ABCD).resume.p2s")
         self.assertEqual(calls[0], f"run net.pcsx2.PCSX2 -batch -- {self.rom}")
         self.assertEqual(calls[1], f"run net.pcsx2.PCSX2 -statefile {state} -batch -- {self.rom}")
+        with open(os.path.join(TMP_HOME, ".local", "state", "console", "logs", "emu-pcsx2.log"), encoding="utf-8") as f:
+            log = f.read()
+        self.assertIn("net.pcsx2.PCSX2 -statefile", log)                  # journal de l'émulateur gardé
+        self.assertIn("# fin (code 3)", log)
 
 
 def _iso9660(boot_line, sector=2048, offset=0, system_id=b"PLAYSTATION"):

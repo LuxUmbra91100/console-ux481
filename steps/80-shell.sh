@@ -10,7 +10,7 @@ chown -R root:root "$PREFIX"
 chmod -R a+rX "$PREFIX"
 python3 -m compileall -q "$PREFIX/consoleshell" || true
 # Outils utiles en SSH, sans taper le chemin complet
-for tool in console-ctl console-pc-setup; do ln -sfn "$PREFIX/bin/$tool" "/usr/local/bin/$tool"; done
+for tool in console-ctl console-pc-setup console-diag; do ln -sfn "$PREFIX/bin/$tool" "/usr/local/bin/$tool"; done
 ok "Shell installé dans $PREFIX"
 
 # Valeurs par défaut choisies à l'installation (l'utilisateur peut les changer dans les réglages).
