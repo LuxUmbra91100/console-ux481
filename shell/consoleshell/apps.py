@@ -236,18 +236,19 @@ class AppManager:
         return self.apps.get(self.foreground) if self.foreground else None
 
     # -------------------------------------------------------------- fermeture --
-    def close(self, app_id):
+    def close(self, app_id, grace_ms=5000):
         app = self.apps.get(app_id)
         if not app:
             return
         app.closing = True
         log.info("fermeture de %s", app_id)
-        # 1) demande polie : fermeture des fenêtres (comme un clic sur ✕)
+        # 1) demande polie : fermeture des fenêtres (comme un clic sur ✕) ; un émulateur en profite
+        #    pour sauvegarder la partie, d'où un délai plus long pour eux
         for con_id in sorted(app.windows, reverse=True):
             self.sway.command(f"[con_id={con_id}] kill")
         # 2) puis signaux si nécessaire
-        later(5000, self._escalate, app, signal.SIGTERM)
-        later(9000, self._escalate, app, signal.SIGKILL)
+        later(grace_ms, self._escalate, app, signal.SIGTERM)
+        later(grace_ms + 4000, self._escalate, app, signal.SIGKILL)
 
     def _escalate(self, app, sig):
         if self.apps.get(app.id) is not app:

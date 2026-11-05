@@ -30,7 +30,8 @@ window.Shell = Shell;
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fileUrl = (p) => p ? (p.startsWith('file:') || p.startsWith('data:') || p.startsWith('http') ? p : 'file://' + encodeURI(p)) : '';
+// Chemin local → URL : chaque morceau encodé (« # », « ? », « % » ou « & » dans un nom de jeu ne cassent rien).
+const fileUrl = (p) => p ? (p.startsWith('file:') || p.startsWith('data:') || p.startsWith('http') ? p : 'file://' + p.split('/').map(encodeURIComponent).join('/')) : '';
 const h = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 
 /* ------------------------------------------------------------------ Icônes --- */

@@ -12,14 +12,20 @@ pilotée uniquement à la **manette Xbox**, réveillée en allumant la manette.
   pour l'émulation, des suggestions de sites…
 - **Moonlight au centre** : un clic sur un jeu de ton PC lance le stream directement, PC
   réveillé automatiquement (Wake-on-LAN) s'il dort.
-- **Émulation** GBA, DS, 3DS, GameCube, Wii, PS1, PS2 via **ES-DE** (bibliothèque avec
-  jaquettes) et des émulateurs préréglés pour la manette et la TV.
+- **PC distant** (Tailscale) : réveil par un relais toujours allumé (Raspberry…), Sunshine
+  relancé tout seul quand il se bloque, veille / redémarrage / arrêt du PC depuis la console.
+- **Émulation** GBA, DS, 3DS, GameCube, Wii, PS1, PS2 via **ES-DE** et des émulateurs
+  préréglés pour la manette et la TV. **Jaquettes ajoutées toutes seules** (base libre de
+  libretro, sans compte) et **reprise des parties là où tu t'étais arrêté**.
 - **Brave à la manette** : stick gauche = pointeur, clavier virtuel qui s'ouvre tout seul
   dans les champs de texte, épinglage de n'importe quelle page sur l'accueil, mode « TV ».
 - **Bouton Xbox = menu de la console** partout : reprendre, sauvegarder/charger l'état du
   jeu, capture d'écran, volume, retour à l'accueil, fermer, mettre en veille.
 - **Veille comme une console** : veille profonde (≈1 W) avec réveil par le bouton Xbox,
   ou veille légère (écran coupé, réveil instantané). Test du réveil intégré.
+- **11 thèmes** pour l'accueil (dont *Noir OLED*), **mode ambiance** après quelques minutes
+  sans rien toucher, alerte **batterie faible** de la manette, page **Santé** (SSD,
+  températures, PC distant).
 - Démarrage silencieux (logo, pas de texte), écran HDMI seul, son sur la TV, Wi-Fi sans
   économie d'énergie (latence Moonlight), partage réseau pour copier tes jeux depuis ton PC,
   mises à jour automatiques et discrètes.
@@ -145,8 +151,8 @@ La console démarre directement sur la TV avec un assistant :
 | Croix / stick gauche | naviguer (tuiles ↔ étagère ↔ boutons système) |
 | Ⓐ | ouvrir / reprendre · Ⓑ retour |
 | Ⓧ | fermer l'appli de la tuile |
-| Ⓨ | options de la tuile : déplacer, renommer, mode TV, retirer |
-| ≡ Menu | veille, redémarrer, éteindre |
+| Ⓨ | options de la tuile : déplacer, renommer, mode TV, retirer · sur un jeu de l'étagère : reprendre ou recommencer depuis le début |
+| ≡ Menu | veille, redémarrer, éteindre, éteindre la manette |
 | ⧉ Vue | réglages |
 | Bouton Xbox | revenir à l'appli en cours |
 
@@ -179,6 +185,20 @@ Le **clavier virtuel** s'ouvre tout seul quand tu cliques dans un champ de texte
 
 **Mode TV** (sites pensés pour la télé, ex. *YouTube TV* dans les suggestions) : la croix et
 Ⓐ/Ⓑ remplacent le pointeur. À activer par tuile (Ⓨ) ou depuis le menu du navigateur.
+
+**Apparence** (*Réglages › Apparence*)
+- **Thème** : Aurore, Océan, Crépuscule, Forêt, Cosmos, Braises, Sakura, Hiver, Rétro 80,
+  Minuit, Noir OLED. La croix fait défiler les thèmes **en direct sur le vrai fond**, Ⓐ choisit,
+  Ⓑ annule.
+- **Animation du fond** : normale, calme (mouvement très lent, sans particules) ou immobile.
+  Tout est animé par la carte graphique : l'interface reste fluide quel que soit le thème.
+- **Mode ambiance** : après 2, 5 ou 10 min sans rien toucher sur l'accueil, l'interface
+  s'efface et il ne reste que le fond et l'heure, qui change de place chaque minute (pas de
+  marquage sur les TV OLED). N'importe quel bouton la fait revenir, sans rien déclencher.
+
+**Manette** : une notification (avec vibration) prévient quand la batterie passe sous 20, 10
+puis 5 %. Pour l'éteindre sans la débrancher : ≡ › *Éteindre la manette*, ou dans le menu
+du bouton Xbox.
 
 ## 6. Moonlight (jouer aux jeux du PC)
 
@@ -229,6 +249,33 @@ une autre directement, et « Ouvrir Moonlight » pour l'interface complète.
 - Réglages du stream par défaut : 1080p, 60 i/s, 20 Mb/s, décodage matériel Intel
   (modifiables dans l'interface Moonlight, qui se pilote à la manette).
 
+**PC dans une autre maison (Tailscale) et Sunshine bloqué**
+
+Sunshine peut se bloquer « à moitié » : son interface web répond, mais plus le streaming
+(Moonlight dit le PC injoignable). La console le détecte et le **relance toute seule** par son
+interface web, à condition de lui donner ton identifiant Sunshine une fois :
+*Réglages › Moonlight › Identifiant Sunshine* (gardé seulement sur la console, dans
+`~/.config/console/secrets.json`). Ⓐ sur la carte du PC (étagère Moonlight) ouvre aussi un
+menu : réveiller, relancer Sunshine, mettre en veille, redémarrer, éteindre.
+
+Le Wake-on-LAN ne traverse pas Internet : si ton PC est ailleurs, un appareil **toujours
+allumé sur son réseau** (un Raspberry Pi par exemple) peut le réveiller à la place de la
+console. En SSH sur la console, une seule fois :
+
+```bash
+console-pc-setup relais pi@raspberrypi.local
+```
+
+Pour la veille, le redémarrage et l'arrêt du PC depuis la console, active d'abord sur le PC
+*Paramètres › Système › Fonctionnalités facultatives › Serveur OpenSSH*, puis :
+
+```bash
+console-pc-setup pc TonUtilisateurWindows@100.x.y.z
+```
+
+Les mots de passe ne sont demandés qu'une fois (pour installer la clé de la console) et ne
+sont pas enregistrés. `console-pc-setup test` vérifie le tout.
+
 ## 7. Émulation
 
 Copie tes sauvegardes de jeux depuis ton PC sur le partage réseau :
@@ -255,12 +302,35 @@ Copie tes sauvegardes de jeux depuis ton PC sur le partage réseau :
 
 - **3DS** : Azahar refuse les jeux chiffrés. Décrypte-les depuis ta 3DS avec GodMode9.
   Les `.cia` doivent d'abord être installés depuis Azahar.
-- **Jaquettes** : dans *Jeux* (ES-DE), ≡ › *Scraper*. Crée un compte gratuit sur
-  screenscraper.fr pour des téléchargements rapides. Elles apparaissent aussi sur l'accueil.
+- **Jaquettes automatiques** : la console cherche toute seule la jaquette et une image de
+  chaque jeu dans la base libre de libretro (sans compte), quelques minutes après le
+  démarrage, toutes les 6 h et dès que tu copies de nouveaux jeux, jamais pendant un jeu ou un
+  stream. Les noms de fichiers approximatifs sont reconnus (« Zelda Minish Cap.gba »,
+  « Pokémon Émeraude.gba »…), avec la version française en priorité. *Réglages › Jeux* :
+  activer/désactiver, chercher maintenant. Pour encore plus (vidéos, logos, résumés) : dans
+  *Jeux* (ES-DE), ≡ › *Scraper* avec un compte gratuit screenscraper.fr.
 - La manette est configurée d'office dans tous les émulateurs, y compris Dolphin
   (GameCube, et Wiimote + Nunchuk pour la Wii : stick droit = pointeur, R3 = recentrer).
 - Pendant un jeu : bouton Xbox › **Sauvegarder / Charger l'état**, **Quitter le jeu**.
   Dans RetroArch, maintenir Start 2 s ouvre son propre menu (shaders, options).
+
+**Reprendre là où tu t'étais arrêté** (*Réglages › Jeux*, activé par défaut)
+
+Quand tu quittes un jeu (bouton Xbox › *Quitter le jeu*, fermeture depuis l'accueil, ou en
+éteignant la console), la partie est mise de côté ; au lancement suivant, depuis l'accueil
+comme depuis ES-DE, elle reprend exactement là. Sur l'accueil, le jeu affiche alors Ⓐ
+*Reprendre*, et Ⓨ propose *Recommencer depuis le début*.
+
+| Émulateur | Comment |
+|---|---|
+| RetroArch (GBA, DS, PS1) | sauvegarde et rechargement automatiques de RetroArch |
+| PCSX2 (PS2) | état de reprise écrit par PCSX2 en quittant, redonné au lancement |
+| Dolphin (GameCube, Wii) | la console enregistre l'emplacement 8 (Maj+F8) avant de quitter |
+| Azahar (3DS) | la console enregistre un état avant de quitter et le recharge 6 s après le lancement |
+
+C'est un état de l'émulateur, en plus de tes sauvegardes normales (carte mémoire, sauvegarde
+du jeu), qui ne changent pas. Les émulateurs se mettant à jour tout seuls, une partie mise de
+côté avec une ancienne version peut ne pas reprendre (PCSX2 repart alors du début).
 
 ## 8. Veille et réveil
 
@@ -286,6 +356,8 @@ Copie tes sauvegardes de jeux depuis ton PC sur le partage réseau :
 | Une appli plante au lancement | Journal : `~/.local/state/console/logs/<appli>.log` |
 | L'interface semble figée | Clavier : Ctrl+Alt+Retour arrière (relance l'interface, les jeux restent ouverts). |
 | Accès à distance | `ssh utilisateur@console.local` |
+| La console rame, plante ou le SSD fait des siennes | *Réglages › Santé* : état du SSD (SMART, erreurs d'accès), températures, mémoire, stockage, Tailscale, latence vers le PC, avec les alertes en tête. |
+| Moonlight : « PC injoignable » alors que le PC est allumé | Sunshine est sûrement bloqué : voir *PC dans une autre maison* (section 6), ou relance-le depuis la carte du PC. |
 
 Commandes utiles (en SSH, depuis la session de l'utilisateur) :
 
@@ -334,3 +406,10 @@ cd ~/console-ux481 && sudo ./update.sh
 Le script récupère la dernière version sur GitHub, réapplique l'installation (tes réglages,
 jeux, sauvegardes et manettes associées sont conservés) et relance l'interface. Redémarre
 ensuite la console pour appliquer les changements système.
+
+Pour ne réappliquer que certaines étapes (plus rapide), par exemple l'interface et les
+réglages des émulateurs :
+
+```bash
+cd ~/console-ux481 && sudo ./update.sh --only 50,80,85
+```

@@ -14,7 +14,7 @@
       controller_off_standby: true, resolution: '1080p', ui_sounds: false, osk_layout: 'azerty', browser_scale: 1.5,
       guide_hold_ms: 700, first_run_done: !/wizard/.test(location.hash),
       moonlight_host: '', moonlight_tile_app: 'Steam Big Picture', moonlight_pin_mode: 'wake',
-      theme: 'aurora', bg_motion: 'full', ambient_min: 5 },
+      theme: 'aurora', bg_motion: 'full', ambient_min: 5, covers_auto: true, resume_games: true },
     tiles: [
       { id: 'moonlight', type: 'moonlight', running: false },
       { id: 'games', type: 'games', running: true },
@@ -46,7 +46,7 @@
         { id: 'ps2', name: 'PlayStation 2', short: 'PS2', color: '#2f6bff', count: 8 },
       ],
       recent: [
-        { system: 'gc', systemName: 'GameCube', short: 'GC', color: '#6c4ee0', path: '/a', name: 'Metroid Prime', cover: art('Metroid Prime', '#ea580c', '#431407'), direct: true },
+        { system: 'gc', systemName: 'GameCube', short: 'GC', color: '#6c4ee0', path: '/a', name: 'Metroid Prime', cover: art('Metroid Prime', '#ea580c', '#431407'), direct: true, resume: true },
         { system: 'ps2', systemName: 'PlayStation 2', short: 'PS2', color: '#2f6bff', path: '/b', name: 'Shadow of the Colossus', cover: art('Colossus', '#57534e', '#0c0a09'), direct: true },
         { system: 'gba', systemName: 'Game Boy Advance', short: 'GBA', color: '#7b5cff', path: '/c', name: 'Golden Sun', cover: art('Golden Sun', '#eab308', '#713f12'), direct: true },
         { system: 'nds', systemName: 'Nintendo DS', short: 'DS', color: '#9aa4b5', path: '/d', name: 'Phoenix Wright', cover: null, direct: true },
@@ -62,6 +62,7 @@
     ],
     sleep: { modes: ['s2idle', 'deep'], current: 's2idle' },
     moonlight_default: 'u1',
+    covers: { running: false, last: Date.now() / 1000 - 3600, added: 12, missing: 3, failed: 0, offline: false },
     moonlight_pins: ['u1'],
     display: { name: 'HDMI-A-1', model: 'Samsung QE55Q60', width: 1920, height: 1080, refresh: 60 },
   };
@@ -92,6 +93,12 @@
         case 'moonlight-pin':
           S.moonlight_pins = args.pin ? ['u1'] : []; later(30, () => Shell._emit('state', { moonlight_pins: S.moonlight_pins }));
           return Promise.resolve({ ok: true, set: !!args.pin });
+        case 'covers-scan':
+          S.covers = Object.assign({}, S.covers, { running: true }); later(30, () => Shell._emit('state', { covers: S.covers }));
+          later(2500, () => { S.covers = Object.assign({}, S.covers, { running: false, added: 2, missing: 3, last: Date.now() / 1000 }); Shell._emit('state', { covers: S.covers }); });
+          return Promise.resolve(true);
+        case 'resume-forget': S.library.recent.forEach(g => { if (g.path === args.path) g.resume = false; });
+          later(30, () => Shell._emit('state', { library: S.library })); return Promise.resolve(true);
         case 'settings-set': S.settings[args.key] = args.value; later(30, () => Shell._emit('state', { settings: S.settings })); return Promise.resolve(S.settings);
         default: return Promise.resolve(true);
       }

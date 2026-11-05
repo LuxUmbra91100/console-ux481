@@ -46,7 +46,29 @@ PY
   fi
 done
 chown -R "$CONSOLE_USER:$CONSOLE_GROUP" "$ESDE"
-ok "ES-DE : français, thème Linear, Dolphin/PCSX2/Azahar/Beetle PSX HW"
+# Les émulateurs passent par console-emu (reprise des parties là où on s'est arrêté). Ce fichier
+# complète les règles d'ES-DE : un émulateur défini ici remplace celui d'origine.
+RULES=$ESDE/custom_systems/es_find_rules.xml
+if [[ ! -f $RULES ]] || grep -q 'console-ux481' "$RULES"; then
+  install -d -o "$CONSOLE_USER" -g "$CONSOLE_GROUP" "$ESDE/custom_systems"
+  {
+    echo '<?xml version="1.0"?>'
+    echo '<!-- console-ux481 : fichier régénéré par l'"'"'installation (retire cette ligne pour le garder tel quel). -->'
+    echo '<ruleList>'
+    for pair in RETROARCH:org.libretro.RetroArch:retroarch DOLPHIN:org.DolphinEmu.dolphin-emu:dolphin \
+                PCSX2:net.pcsx2.PCSX2:pcsx2 AZAHAR:org.azahar_emu.Azahar:azahar; do
+      IFS=: read -r name app emu <<< "$pair"
+      printf '    <emulator name="%s">\n        <rule type="staticpath">\n' "$name"
+      printf '            <entry>/var/lib/flatpak/exports/bin/%s|%s/bin/console-emu %s</entry>\n' "$app" "$PREFIX" "$emu"
+      printf '        </rule>\n    </emulator>\n'
+    done
+    echo '</ruleList>'
+  } > "$RULES"
+  chown "$CONSOLE_USER:$CONSOLE_GROUP" "$RULES"
+else
+  warn "ES-DE : $RULES personnalisé, laissé tel quel (la reprise des parties lancées depuis ES-DE en dépend)"
+fi
+ok "ES-DE : français, thème Linear, Dolphin/PCSX2/Azahar/Beetle PSX HW, reprise des parties"
 
 # ========================================================= RetroArch ===========
 RA=$VAR/org.libretro.RetroArch/config/retroarch
@@ -68,6 +90,8 @@ want = {
     "confirm_quit": "false",
     "config_save_on_exit": "true",
     "savestate_auto_index": "false",
+    "savestate_auto_save": "true",        # reprise des parties (console-emu suit le réglage)
+    "savestate_auto_load": "true",
     "video_vsync": "true",
     "notification_show_autoconfig": "false",
     "menu_show_core_updater": "true",
@@ -187,6 +211,9 @@ Bios = $H/BIOS
 SDL = true
 SDLControllerEnhancedMode = false
 
+[EmuCore]
+SaveStateOnShutdown = true
+
 [EmuCore/GS]
 Renderer = 14
 upscale_multiplier = 1
@@ -230,6 +257,7 @@ EOF
 else
   ini_set "$P2/PCSX2.ini" UI SetupWizardIncomplete false StartFullscreen true ConfirmShutdown false PauseOnFocusLoss true
   ini_set "$P2/PCSX2.ini" Folders Bios "$H/BIOS"
+  ini_set "$P2/PCSX2.ini" EmuCore SaveStateOnShutdown true   # état de reprise écrit en quittant
 fi
 chown -R "$CONSOLE_USER:$CONSOLE_GROUP" "$VAR/net.pcsx2.PCSX2"
 ok "PCSX2 : plein écran, manette, BIOS dans ~/BIOS (bouton Xbox libre)"

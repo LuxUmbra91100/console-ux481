@@ -14,12 +14,12 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from . import health, library, moonlight, network, pcremote  # noqa: E402
+from . import covers, health, library, moonlight, network, pcremote, resume  # noqa: E402
 from .apps import AppManager, profile_for  # noqa: E402
 from .audio import Audio  # noqa: E402
 from .bluetooth import Bluetooth  # noqa: E402
 from .brave import BraveCDP  # noqa: E402
-from .config import (BRAVE_PROFILE, CAPTURES_DIR, CONTROL_SOCKET, PREFIX, Settings,  # noqa: E402
+from .config import (BRAVE_PROFILE, CAPTURES_DIR, CONTROL_SOCKET, COVERS_STATE, PREFIX, Settings,  # noqa: E402
                      ensure_dirs, get_secret, secret_keys, set_secret)
 from .control import ControlServer  # noqa: E402
 from .display import Display  # noqa: E402
@@ -30,7 +30,8 @@ from .power import Power, mem_sleep_modes  # noqa: E402
 from .sites import PRESETS, Sites, normalize_url  # noqa: E402
 from .swayipc import Sway, SwayEvents  # noqa: E402
 from .ui import HomeWindow, LayerWindow  # noqa: E402
-from .util import battery_alert, every, later, log, on_main, run, run_async, setup_logging, thread  # noqa: E402
+from .util import (battery_alert, every, later, log, on_main, read_json, run, run_async,  # noqa: E402
+                   setup_logging, thread, write_json)
 
 VERSION = "1.0"
 ROOT_HELPER = ["sudo", "-n", f"{PREFIX}/bin/console-root"]
@@ -49,6 +50,10 @@ HEAVY_PROFILES = {"dolphin", "pcsx2", "azahar"}
 def first_existing(paths):
     return next((p for p in paths if p and os.path.exists(p)), None)
 
+
+# Profils de fenêtre des émulateurs, et délai laissé à un émulateur pour se fermer en sauvegardant
+EMULATOR_PROFILES = ("dolphin", "pcsx2", "azahar", "retroarch")
+EMU_GRACE_MS = 15000
 
 class Shell:
     def __init__(self):
@@ -78,6 +83,9 @@ class Shell:
         self._repairing = set()          # uuid des PC dont Sunshine est en cours de relance
         self._battery_warned = {}        # manette → dernier seuil de batterie signalé (20, 10, 5)
         self.ambient = False             # accueil en mode ambiance (interface effacée)
+        # Jaquettes automatiques : état de la dernière recherche (gardé entre deux démarrages)
+        self.covers_state = dict(read_json(COVERS_STATE, {}) or {}, running=False)
+        self._games_count = None
         self.pin_watch = None            # saisie du code PIN Windows en attente
 
         self.home = HomeWindow(self.on_ui)
@@ -103,6 +111,7 @@ class Shell:
         later(200, self.startup)
         every(20000, self.poll_moonlight)
         every(60000, self.refresh_status)
+        every(6 * 3600 * 1000, self.start_covers)
 
     # ================================================================ démarrage
     def startup(self):
@@ -116,6 +125,7 @@ class Shell:
         self.poll_moonlight(force=True)
         thread(self._detect_cec, name="cec")
         self.push_all()
+        later(120000, self.start_covers)          # laisse la console finir de démarrer
 
     def _detect_cec(self):
         if shutil.which("cec-client"):
@@ -165,6 +175,7 @@ class Shell:
             "moonlight_pins": self.pin_hosts(),
             "pc_remote": self.pc_remote_public(),
             "moonlight_default": (self.default_host() or {}).get("uuid"),
+            "covers": self.covers_state,
         }
 
     def push(self, **partial):
@@ -200,6 +211,155 @@ class Shell:
     def _set_library(self, data):
         self.library_cache = data
         self.push(library=data)
+        count = sum(s.get("count", 0) for s in data.get("systems", []))
+        if self._games_count is not None and count > self._games_count:
+            self.start_covers()                   # nouveaux jeux copiés : on leur cherche une jaquette
+        self._games_count = count
+
+    # ============================================================ reprise des parties
+    def save_game_then(self, then, key=None):
+        """Avant de quitter Dolphin ou Azahar (qui ne sauvegardent pas seuls en quittant), leur fait
+        enregistrer l'état de reprise et attend qu'il soit écrit. RetroArch et PCSX2 le font eux-mêmes."""
+        key = key or self.fg_profile[0]
+        combo = resume.SAVE_KEYS.get(key)
+        if not combo or not self.settings["resume_games"]:
+            then()
+            return
+        since = time.time() - 0.5
+        later(300, self.mapper.key, *combo)           # le menu refermé, la fenêtre du jeu a le clavier
+        later(700, self.toast, "Partie mise de côté", "Elle reprendra ici au prochain lancement", "save", 2600)
+
+        def work():
+            if not resume.wait_for_state(key, since, timeout=8):
+                log.warning("reprise : aucun état écrit par %s", key)
+            on_main(then)
+        thread(work, name="resume-save")
+
+    def _app_emulators(self, app):
+        """Fenêtres d'émulateur d'une appli (jeu lancé de l'accueil, ou depuis ES-DE) : [(fenêtre, profil)]."""
+        out = []
+        for v in self.sway.views():
+            if v.get("id") in app.windows:
+                key, _ = profile_for(v)
+                if key in EMULATOR_PROFILES:
+                    out.append((v, key))
+        return out
+
+    def close_app_saving(self, app_id, then=None):
+        """Ferme une appli. Si un jeu Dolphin ou Azahar y tourne, il revient à l'écran le temps d'être
+        mis de côté (leurs raccourcis n'atteignent que la fenêtre active)."""
+        app = self.apps.apps.get(app_id)
+        if not app:
+            if then:
+                then()
+            return
+        emus = self._app_emulators(app)
+        grace = EMU_GRACE_MS if emus else 5000
+        needs_save = [(v, k) for v, k in emus if k in resume.SAVE_KEYS] if self.settings["resume_games"] else []
+
+        def close():
+            self.apps.close(app_id, grace_ms=grace)
+            if then:
+                then()
+        if not needs_save:
+            close()
+            return
+        con, key = needs_save[0]
+        self.apps.show(app_id)
+
+        def save():
+            self.sway.command(f"[con_id={con['id']}] focus")
+            self.save_game_then(close, key=key)
+        later(700, save)
+
+    def close_games_then(self, then):
+        """Avant d'éteindre : ferme proprement les jeux ouverts (états de reprise écrits), puis then()."""
+        games = [a for a in list(self.apps.apps.values()) if self._app_emulators(a)]
+        if not games:
+            then()
+            return
+        self.toast("Fermeture du jeu…", "Ta partie est mise de côté", "save", 4000)
+        queue_ = list(games)
+        t0 = time.monotonic()
+
+        def wait_exit():
+            if not any(self.apps.apps.get(a.id) is a for a in games) or time.monotonic() - t0 > 25:
+                then()
+                return False
+            return True
+
+        def next_app():
+            if queue_:
+                self.close_app_saving(queue_.pop(0).id, then=next_app)
+            else:
+                every(500, wait_exit)
+        next_app()
+
+    def resume_load(self, emu):
+        """Azahar ne sait pas charger un état au lancement : on envoie « charger le plus récent » une
+        fois le jeu à l'écran depuis quelques secondes."""
+        combo = resume.LOAD_KEYS.get(emu)
+        if not combo:
+            return
+        t0, shown = time.monotonic(), [None]
+
+        def check():
+            if time.monotonic() - t0 > 120:
+                return False
+            if self.focus == "app" and self.fg_profile[0] == emu and self.panel_mode is None:
+                shown[0] = shown[0] or time.monotonic()
+                if time.monotonic() - shown[0] >= 6:
+                    self.mapper.key(*combo)
+                    later(900, self.toast, "Partie reprise", "Là où tu t'étais arrêté", "load")
+                    return False
+            else:
+                shown[0] = None
+            return True
+        every(500, check)
+
+    # ============================================================ jaquettes
+    def start_covers(self, manual=False):
+        """Cherche les jaquettes manquantes en arrière-plan, jamais pendant un jeu ou un stream."""
+        if self.covers_state.get("running") or not (manual or self.settings["covers_auto"]):
+            return
+        self.covers_state = dict(self.covers_state, running=True)
+        self.push(covers=self.covers_state)
+
+        def wait():
+            # En pause pendant un jeu, un stream ou la veille : réseau et processeur leur reviennent.
+            return self.focus == "app" or self.apps.running("moonlight") or self.power.state != "on"
+
+        def stop():
+            return not (manual or self.settings["covers_auto"])
+
+        def work():
+            try:
+                stats = covers.run(should_wait=wait, should_stop=stop)
+            except Exception:  # noqa: BLE001
+                log.exception("jaquettes")
+                stats = None
+            on_main(self._covers_done, stats, manual)
+        thread(work, name="covers")
+
+    def _covers_done(self, stats, manual):
+        state = {"running": False, "last": time.time()}
+        if stats:
+            state.update({k: stats[k] for k in ("added", "missing", "failed", "offline")})
+        self.covers_state = dict(self.covers_state, **state)
+        write_json(COVERS_STATE, dict(self.covers_state, running=False))
+        self.push(covers=self.covers_state)
+        n = (stats or {}).get("added", 0)
+        if n:
+            self.refresh_library()
+            self.toast(f"{n} jaquette{'s' if n > 1 else ''} ajoutée{'s' if n > 1 else ''}",
+                       "Visibles dans l'accueil et dans Jeux", icon="library")
+        elif manual:
+            if stats is None or stats["offline"]:
+                self.toast("Jaquettes : base libretro injoignable", "Vérifie la connexion Internet", icon="warning")
+            else:
+                miss = stats["missing"]
+                self.toast("Aucune nouvelle jaquette", f"{miss} jeu{'x' if miss > 1 else ''} sans correspondance"
+                           if miss else "Tous tes jeux en ont déjà une", icon="library")
 
     def poll_moonlight(self, force=False):
         if not force and (self.focus != "home" or self.power.state != "on"):
@@ -940,6 +1100,8 @@ class Shell:
             self.pad.guide_hold = max(0.3, (value or 700) / 1000)
         if key == "resolution":
             self.display.apply()
+        if key == "covers_auto" and value:
+            self.start_covers()
         self.push(settings=self.settings.public())
 
     # ============================================================ commandes UI
@@ -963,7 +1125,25 @@ class Shell:
         self.resume(args.get("app"))
 
     def ui_close_app(self, args, src):
-        self.apps.close(args.get("app"))
+        app_id, nxt = args.get("app"), args.get("next")
+        if not nxt:
+            self.close_app_saving(app_id)
+            return
+        # « Fermer et lancer » : la commande suivante attend que l'appli soit vraiment fermée.
+        app, t0 = self.apps.apps.get(app_id), time.monotonic()
+
+        def wait_gone():
+            if self.apps.apps.get(app_id) is app and app is not None and time.monotonic() - t0 < 25:
+                return True
+            if nxt.get("cmd") in ("game-launch", "library-open"):
+                self.on_ui(self.home.surface, nxt["cmd"], nxt.get("args") or {})
+            return False
+        self.close_app_saving(app_id, then=lambda: every(300, wait_gone))
+
+    def ui_resume_forget(self, args, src):
+        resume.forget(args.get("path") or "")
+        self.refresh_library()
+        return True
 
     def ui_go_home(self, args, src):
         self.show_home()
@@ -1080,6 +1260,10 @@ class Shell:
             thread(work, name="health")
         return go
 
+    def ui_covers_scan(self, args, src):
+        self.start_covers(manual=True)
+        return True
+
     def ui_ambient(self, args, src):
         self.ambient = bool(args.get("on"))
 
@@ -1154,10 +1338,9 @@ class Shell:
         action = args.get("action")
         if action == "standby":
             later(150, self.power.standby, "menu")
-        elif action == "reboot":
-            run_async(["systemctl", "reboot"])
-        elif action == "poweroff":
-            run_async(["systemctl", "poweroff"])
+        elif action in ("reboot", "poweroff"):
+            # Les jeux ouverts sont d'abord fermés proprement : chaque émulateur met la partie de côté.
+            self.close_games_then(lambda: run_async(["systemctl", action]))
         elif action == "restart-ui":
             later(200, Gtk.main_quit)
 
@@ -1205,7 +1388,8 @@ class Shell:
             self.close_panel(self.show_home)
         elif action == "close-app" and app:
             self.close_panel()
-            self.apps.close(app.id)
+            grace = EMU_GRACE_MS if self.fg_profile[0] in EMULATOR_PROFILES else 5000
+            self.save_game_then(lambda: self.apps.close(app.id, grace_ms=grace))
         elif action == "save-state" and prof.get("save"):
             self.close_panel()
             keys(prof["save"])
@@ -1220,7 +1404,7 @@ class Shell:
             self.close_panel()
             con = self.sway.focused_view()
             if con:
-                self.apps.close_window(con["id"])
+                self.save_game_then(lambda: self.apps.close_window(con["id"]))
         elif action == "type-pin" and app:
             uuid = self.pin_for(app)
             self.close_panel()
@@ -1361,6 +1545,11 @@ class Shell:
                 w.view.reload()
         elif cmd == "state":
             return self.snapshot()
+        elif cmd == "covers":
+            self.start_covers(manual=True)
+            return {"running": True}
+        elif cmd == "resume-load" and args:
+            self.resume_load(args[0])
         elif cmd == "pc-config" and len(args) >= 1:
             key = {"relay": "wake_relay", "relais": "wake_relay", "ssh": "pc_ssh", "pc": "pc_ssh"}.get(args[0])
             if not key:

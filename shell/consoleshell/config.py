@@ -29,6 +29,7 @@ SETTINGS_PATH = os.path.join(CONFIG_DIR, "settings.json")
 LAYOUT_PATH = os.path.join(CONFIG_DIR, "home.json")
 RECENTS_PATH = os.path.join(STATE_DIR, "recents.json")
 CONTROLLERS_PATH = os.path.join(STATE_DIR, "controllers.json")
+COVERS_STATE = os.path.join(STATE_DIR, "covers.json")
 SECRETS_PATH = os.path.join(CONFIG_DIR, "secrets.json")
 SYSTEM_DEFAULTS = "/etc/console/defaults.json"
 CONTROL_SOCKET = os.path.join(RUNTIME_DIR, "console-shell.sock")
@@ -54,6 +55,8 @@ DEFAULTS = {
     "theme": "aurora",                          # thème de l'accueil (voir THEMES dans home.js)
     "bg_motion": "full",                        # full | calm | off
     "ambient_min": 5,                           # mode ambiance après N min sans activité (0 = jamais)
+    "covers_auto": True,                        # jaquettes manquantes téléchargées (base libretro)
+    "resume_games": True,                       # parties mises de côté en quittant, reprises au lancement
 }
 
 

@@ -196,8 +196,9 @@ function shelfFor(t) {
     items.push({ html: `<div class="card wide">${icon('library')}<div><h3>Bibliothèque</h3><p>Tous tes jeux, jaquettes, favoris (ES-DE).</p></div></div>`, act: () => launch('games') });
     recent.forEach(g => {
       const ph = `<div class="ph" style="background:linear-gradient(160deg, ${g.color || '#555'}, #0b0f1a)">${esc(g.short)}</div>`;
+      const resumes = g.resume && (A.st.settings || {}).resume_games !== false;
       items.push({ html: `<div class="card poster">${g.cover ? `<img src="${esc(fileUrl(g.cover))}" alt="">` : ph}<span class="sys">${esc(g.short)}</span><div class="cap">${esc(g.name)}<small>${esc(g.systemName)}</small></div></div>`,
-        act: () => playGame(g), art: g.cover, label: g.name });
+        act: () => playGame(g), art: g.cover, label: g.name, aLabel: resumes ? 'Reprendre' : 'Jouer', opts: () => gameOptions(g, resumes) });
     });
     systems.filter(s => s.count).forEach(s => items.push({
       html: `<div class="card square" style="background:linear-gradient(160deg, ${rgba(s.color, .55)}, rgba(255,255,255,.04))"><b>${esc(s.short)}</b><span>${s.count} jeu${s.count > 1 ? 'x' : ''}</span></div>`,
@@ -285,7 +286,10 @@ function renderHints() {
     const running = t && isRunning(t);
     list = [['a', running ? 'Reprendre' : t && t.type === 'add' ? 'Ajouter' : 'Ouvrir'], running ? ['x', 'Fermer'] : null,
       t && !['add', 'running'].includes(t.type) ? ['y', 'Options'] : null, ['start', 'Alimentation']];
-  } else if (A.zone === 'shelf') list = [['a', 'Lancer'], ['b', 'Retour']];
+  } else if (A.zone === 'shelf') {
+    const it = A.shelfItems && A.shelfItems[A.si];
+    list = [['a', (it && it.aLabel) || 'Lancer'], it && it.opts ? ['y', 'Options'] : null, ['b', 'Retour']];
+  }
   else list = [['a', 'Ouvrir'], ['b', 'Retour']];
   setHTML($('#hints'), hints(list));
 }
@@ -316,7 +320,7 @@ function homeButton(b) {
       } else if (A.zone === 'shelf') {
         const n = A.si + d;
         if (n < 0 || n >= A.shelfItems.length) return Sound.bump();
-        A.si = n; A.shelfMemo[focusedTile().id] = n; markShelf(); Sound.move();
+        A.si = n; A.shelfMemo[focusedTile().id] = n; markShelf(); renderHints(); Sound.move();
       } else {
         const n = A.yi + d;
         if (n < 0 || n >= SYS_BUTTONS.length) return Sound.bump();
@@ -343,7 +347,10 @@ function homeButton(b) {
       if (A.zone === 'row' && t && isRunning(t)) confirmClose(t.id, CORE[t.type] ? CORE[t.type].title : t.title);
       return;
     }
-    case 'y': if (A.zone === 'row' && !['add', 'running'].includes(focusedTile().type)) tileOptions(focusedTile()); return;
+    case 'y':
+      if (A.zone === 'row' && !['add', 'running'].includes(focusedTile().type)) tileOptions(focusedTile());
+      else if (A.zone === 'shelf' && A.shelfItems[A.si] && A.shelfItems[A.si].opts) { Sound.select(); A.shelfItems[A.si].opts(); }
+      return;
     case 'start': return powerMenu();
     case 'back': return openSettings();
   }
@@ -396,6 +403,14 @@ function pcMenu(h) {
 }
 
 function stream(host, app) { Sound.launch(); Shell.send('moonlight-stream', { uuid: host.uuid, app: app.name }); }
+function gameOptions(g, resumes) {
+  const items = [{ icon: 'play', label: resumes ? 'Reprendre la partie' : 'Jouer', sub: resumes ? 'Là où tu t\'étais arrêté' : '', action: () => playGame(g) }];
+  if (resumes) items.push({ icon: 'restart', label: 'Recommencer depuis le début', sub: 'La partie mise de côté est oubliée (tes sauvegardes du jeu restent)',
+    action: () => Shell.call('resume-forget', { path: g.path }).then(() => playGame(g)) });
+  items.push({ icon: 'back', label: 'Annuler' });
+  menu({ title: g.name, items });
+}
+
 function playGame(g) {
   Sound.launch();
   if (g.direct === false) return Shell.send('library-open', { system: g.system });
@@ -530,6 +545,7 @@ const SECTIONS = [
   { id: 'pads', icon: 'gamepad', label: 'Manettes' },
   { id: 'net', icon: 'wifi', label: 'Réseau' },
   { id: 'moonlight', icon: 'stream', label: 'Moonlight' },
+  { id: 'games', icon: 'library', label: 'Jeux' },
   { id: 'look', icon: 'palette', label: 'Apparence' },
   { id: 'display', icon: 'display', label: 'Image et son' },
   { id: 'sleep', icon: 'moon', label: 'Veille' },
@@ -635,6 +651,18 @@ class SettingsLayer extends Layer {
       out.push(toggleRow('sparkle', 'Réparer Sunshine automatiquement', 'S\'il ne répond plus qu\'à moitié (Moonlight le dirait « injoignable »)', 'sunshine_auto_repair'));
       out.push({ static: true, icon: 'power', title: 'Relais de réveil', sub: pr.relay ? `${pr.relay} envoie le Wake-on-LAN depuis le réseau du PC` : 'Non configuré : console-pc-setup relais utilisateur@appareil (en SSH)' });
       out.push({ static: true, icon: 'moon', title: 'Veille et redémarrage du PC', sub: pr.ssh ? `Par SSH (${pr.ssh})` : 'Non configuré : serveur OpenSSH sur le PC, puis console-pc-setup pc utilisateur@PC' });
+    } else if (id === 'games') {
+      const cv = st.covers || {};
+      out.push({ group: 'Jaquettes' });
+      out.push(toggleRow('library', 'Jaquettes automatiques', 'Ajoute celles qui manquent depuis la base libre de libretro, sans compte', 'covers_auto'));
+      const last = cv.running ? 'Recherche en cours… (en pause pendant les jeux)' : !cv.last ? 'Pas encore lancée'
+        : cv.offline ? 'Base libretro injoignable lors de la dernière recherche'
+        : `Dernière recherche : ${cv.added || 0} ajoutée${cv.added > 1 ? 's' : ''}${cv.missing ? ` · ${cv.missing} jeu${cv.missing > 1 ? 'x' : ''} sans correspondance` : ''}`;
+      out.push({ icon: 'search', title: 'Chercher maintenant', sub: last, act: () => { if (!cv.running) Shell.send('covers-scan'); } });
+      out.push({ static: true, icon: 'info', title: 'Encore plus d\'images', sub: 'Dans Jeux, Menu › Scraper avec un compte ScreenScraper ajoute vidéos, logos et résumés.' });
+      out.push({ group: 'Reprise des parties' });
+      out.push(toggleRow('play', 'Reprendre là où tu t\'étais arrêté', 'En quittant un jeu, la partie est mise de côté ; elle reprend au lancement suivant', 'resume_games'));
+      out.push({ static: true, icon: 'info', title: 'Pour que ça marche', sub: 'Quitte avec le bouton Xbox › Quitter le jeu (ou éteins la console). Pour repartir de zéro : Ⓨ sur le jeu dans l\'accueil.' });
     } else if (id === 'look') {
       const th = THEMES.find(x => x.id === s.theme) || THEMES[0];
       out.push({ group: 'Accueil' });
@@ -1089,10 +1117,9 @@ Shell.on('wake', () => {
 });
 Shell.on('dialog', d => {
   if (d.kind === 'close-first') {
-    confirm('Fermer le jeu en cours ?', 'Un autre jeu est déjà lancé. Le fermer pour lancer celui-ci ?', 'Fermer et lancer', () => {
-      Shell.send('close-app', { app: d.app });
-      setTimeout(() => Shell.send(d.next.cmd, d.next.args), 2500);
-    }, true);
+    // Le jeu en cours est d'abord mis de côté et fermé ; le shell lance l'autre une fois la fenêtre partie.
+    confirm('Fermer le jeu en cours ?', 'Un autre jeu est déjà lancé. Sa partie sera mise de côté avant de lancer celui-ci.', 'Fermer et lancer',
+      () => Shell.send('close-app', { app: d.app, next: d.next }), true);
   }
 });
 
@@ -1111,7 +1138,7 @@ function scheduleRender(partial) {
     renderCaption();
     if (all || k.has('moonlight') || k.has('library') || k.has('presets') || k.has('net')) renderShelf(true);
     renderSys(); renderHints();
-    if (A.settings && (k.has('bt') || k.has('net') || k.has('settings') || k.has('display') || k.has('sleep') || k.has('moonlight') || k.has('moonlight_pins'))) A.settings.render();
+    if (A.settings && ['bt', 'net', 'settings', 'display', 'sleep', 'moonlight', 'moonlight_pins', 'pc_remote', 'covers'].some(x => k.has(x))) A.settings.render();
     if (A.wizard && A.layers.includes(A.wizard) && (k.has('pads') || k.has('net'))) A.wizard.refresh();
     if (A.st.settings && A.st.settings.first_run_done === false && !A.wizardShown) { A.wizardShown = true; startWizard(); }
   });

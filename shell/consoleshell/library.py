@@ -5,7 +5,8 @@ import re
 import time
 import xml.etree.ElementTree as ET
 
-from .config import HOME, RECENTS_PATH, ROMS_DIR
+from . import resume
+from .config import BIN_DIR, HOME, RECENTS_PATH, ROMS_DIR
 from .util import atomic_write, log, read_json, write_json
 
 ESDE_DIR = os.environ.get("ESDE_APPDATA_DIR", os.path.join(HOME, "ES-DE"))
@@ -26,15 +27,16 @@ SYSTEMS = [
 ]
 SYSTEM_INDEX = {s[0]: s for s in SYSTEMS}
 
-# Commandes de lancement direct (identiques aux émulateurs choisis dans ES-DE).
+# Commandes de lancement direct (mêmes émulateurs que dans ES-DE), via console-emu pour la reprise.
+EMU = os.path.join(BIN_DIR, "console-emu")
 COMMANDS = {
-    "gba": lambda rom: ["flatpak", "run", "org.libretro.RetroArch", "-L", f"{RA_CORES}/mgba_libretro.so", rom],
-    "nds": lambda rom: ["flatpak", "run", "org.libretro.RetroArch", "-L", f"{RA_CORES}/melondsds_libretro.so", rom],
-    "psx": lambda rom: ["flatpak", "run", "org.libretro.RetroArch", "-L", f"{RA_CORES}/mednafen_psx_hw_libretro.so", rom],
-    "gc": lambda rom: ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-b", "-e", rom],
-    "wii": lambda rom: ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-b", "-e", rom],
-    "ps2": lambda rom: ["flatpak", "run", "net.pcsx2.PCSX2", "-batch", "-fullscreen", "--", rom],
-    "n3ds": lambda rom: ["flatpak", "run", "org.azahar_emu.Azahar", "-f", rom],
+    "gba": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/mgba_libretro.so", rom],
+    "nds": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/melondsds_libretro.so", rom],
+    "psx": lambda rom: [EMU, "retroarch", "-L", f"{RA_CORES}/mednafen_psx_hw_libretro.so", rom],
+    "gc": lambda rom: [EMU, "dolphin", "-b", "-e", rom],
+    "wii": lambda rom: [EMU, "dolphin", "-b", "-e", rom],
+    "ps2": lambda rom: [EMU, "pcsx2", "-batch", "-fullscreen", "--", rom],
+    "n3ds": lambda rom: [EMU, "azahar", "-f", rom],
 }
 # Libellés ES-DE compatibles avec le lancement direct.
 SUPPORTED_LABELS = {
@@ -69,12 +71,19 @@ def systems():
 
 
 def media(system, rom_path):
-    base = os.path.splitext(os.path.basename(rom_path))[0]
+    """Image du jeu rangée par ES-DE (ou par les jaquettes automatiques) : même chemin que le jeu dans
+    son dossier de système, sans l'extension (« psx/covers/Final Fantasy VII/Disc 1.png »)."""
+    stem = os.path.splitext(rom_path)[0]
+    rel = os.path.relpath(stem, os.path.join(ROMS_DIR, system))
+    names = [rel] if not rel.startswith("..") else []
+    if os.path.basename(stem) not in names:
+        names.append(os.path.basename(stem))
     for mtype in MEDIA_TYPES:
-        for ext in (".png", ".jpg", ".webp"):
-            p = os.path.join(MEDIA_DIR, system, mtype, base + ext)
-            if os.path.exists(p):
-                return p
+        for name in names:
+            for ext in (".png", ".jpg", ".webp"):
+                p = os.path.join(MEDIA_DIR, system, mtype, name + ext)
+                if os.path.exists(p):
+                    return p
     return None
 
 
@@ -134,7 +143,8 @@ def recent(limit=12):
         meta = SYSTEM_INDEX.get(system)
         out.append({"system": system, "systemName": meta[1] if meta else system, "short": meta[2] if meta else "",
                     "color": meta[3] if meta else "#888", "path": g["path"], "name": g["name"],
-                    "ts": g["ts"], "cover": media(system, g["path"]), "direct": direct})
+                    "ts": g["ts"], "cover": media(system, g["path"]), "direct": direct,
+                    "resume": resume.has_resume(g["path"])})
         if len(out) >= limit:
             break
     return out

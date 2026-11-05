@@ -1,0 +1,55 @@
+#!/usr/bin/python3
+"""console-emu ÉMULATEUR [ARGUMENTS…] — lance un émulateur (Flatpak) avec la reprise des parties.
+
+ÉMULATEUR : retroarch, dolphin, pcsx2 ou azahar. Utilisé par l'accueil et par ES-DE (règles de
+recherche d'émulateurs dans ~/ES-DE/custom_systems/es_find_rules.xml). Ajoute l'état de reprise du
+jeu s'il y en a un, et retient à la fermeture celui qui vient d'être enregistré.
+"""
+import os
+import signal
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+from consoleshell import resume  # noqa: E402
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in resume.FLATPAKS:
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    emu, args = sys.argv[1], sys.argv[2:]
+    try:
+        cmd, rom, state, hotkey = resume.command(emu, args)
+    except Exception as exc:  # noqa: BLE001 — la reprise ne doit jamais empêcher de jouer
+        print(f"console-emu : reprise indisponible ({exc})", file=sys.stderr)
+        cmd, rom, state, hotkey = ["flatpak", "run", resume.FLATPAKS[emu]] + args, None, None, False
+    if hotkey:
+        # Azahar ne charge pas d'état au lancement : la console enverra le raccourci une fois le jeu affiché.
+        ctl = os.path.join(os.path.dirname(os.path.realpath(__file__)), "console-ctl")
+        subprocess.Popen([ctl, "resume-load", emu], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if state:
+        print(f"console-emu : reprise depuis {state}", file=sys.stderr)
+    # La fermeture passe par la fenêtre ou par un signal envoyé à tout le groupe (l'émulateur le reçoit
+    # aussi) : on ne le relaie pas — un second SIGTERM forcerait PCSX2 à quitter sans sauvegarder.
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_IGN)
+    started = time.time()
+    try:
+        code = subprocess.call(cmd, preexec_fn=lambda: [signal.signal(s, signal.SIG_DFL)
+                                                         for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)])
+    except OSError as exc:
+        print(f"console-emu : impossible de lancer {cmd[0]} ({exc})", file=sys.stderr)
+        return 127
+    try:
+        saved = resume.after_exit(emu, rom, started, state, time.time() - started)
+        if saved:
+            print(f"console-emu : partie mise de côté ({saved})", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"console-emu : état non retenu ({exc})", file=sys.stderr)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

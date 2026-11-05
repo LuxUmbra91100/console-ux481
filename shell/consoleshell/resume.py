@@ -1,0 +1,211 @@
+"""Reprendre les jeux là où on s'est arrêté.
+
+Chaque émulateur à sa façon :
+- RetroArch (GBA, DS, PS1) le fait lui-même : état sauvegardé en quittant, rechargé au lancement
+  (savestate_auto_save / savestate_auto_load, réglés avant chaque lancement selon le réglage).
+- PCSX2 (PS2) enregistre un état de reprise en quittant (SaveStateOnShutdown) : on le lui redonne
+  au lancement suivant (-statefile).
+- Dolphin (GameCube, Wii) ne sauvegarde pas seul : la console lui fait enregistrer l'emplacement 8
+  (Maj+F8) avant de le fermer, puis le lui redonne au lancement (-s).
+- Azahar (3DS) non plus, et ne sait pas charger un état au lancement : la console lui fait
+  enregistrer un état (Ctrl+C) avant de le fermer et le recharge (Ctrl+V) peu après le lancement.
+
+Tous les lancements passent par console-emu (accueil, et ES-DE grâce à ses règles de recherche
+d'émulateurs) : il ajoute l'état à charger et note, à la fermeture, quel fichier d'état correspond à
+quel jeu. Les Flatpak se mettent à jour tout seuls : Dolphin et Azahar ignorent sans dommage un
+état d'une version incompatible, mais PCSX2 refuserait alors de démarrer le jeu, donc pour lui un état
+n'est rechargé qu'avec la version qui l'a écrit.
+"""
+import glob
+import os
+import re
+import time
+
+from .config import HOME, SETTINGS_PATH, STATE_DIR
+from .util import atomic_write, read_json, write_json
+
+VAR = os.path.join(HOME, ".var", "app")
+FLATPAKS = {"retroarch": "org.libretro.RetroArch", "dolphin": "org.DolphinEmu.dolphin-emu",
+            "pcsx2": "net.pcsx2.PCSX2", "azahar": "org.azahar_emu.Azahar"}
+# Émulateurs qui refusent de démarrer avec un état d'une autre version.
+STRICT_BUILD = {"pcsx2"}
+# Où chaque émulateur range l'état qui sert à la reprise.
+STATE_GLOBS = {
+    "dolphin": [os.path.join(VAR, FLATPAKS["dolphin"], "data/dolphin-emu/StateSaves/*.s08")],
+    "pcsx2": [os.path.join(VAR, FLATPAKS["pcsx2"], "config/PCSX2/sstates/*.resume.p2s")],
+    "azahar": [os.path.join(VAR, FLATPAKS["azahar"], "data/azahar-emu/states/*.cst")],
+}
+SAVE_KEYS = {"dolphin": ["KEY_LEFTSHIFT", "KEY_F8"], "azahar": ["KEY_LEFTCTRL", "KEY_C"]}
+LOAD_KEYS = {"azahar": ["KEY_LEFTCTRL", "KEY_V"]}
+RESUME_PATH = os.path.join(STATE_DIR, "resume.json")
+RA_DIR = os.path.join(VAR, FLATPAKS["retroarch"], "config/retroarch")
+RA_CFG = os.path.join(RA_DIR, "retroarch.cfg")
+FLATPAK_ROOTS = ("/var/lib/flatpak/app", os.path.join(HOME, ".local/share/flatpak/app"))
+KEEP = 300
+
+
+def enabled():
+    return (read_json(SETTINGS_PATH, {}) or {}).get("resume_games", True) is not False
+
+
+def build(emu):
+    """Version installée de l'émulateur (commit Flatpak déployé), pour ne pas recharger un état
+    d'une autre version."""
+    for root in FLATPAK_ROOTS:
+        try:
+            return os.path.basename(os.readlink(os.path.join(root, FLATPAKS[emu], "current", "active")))
+        except OSError:
+            continue
+    return None
+
+
+def newest_state(emu, since=0.0):
+    best = None
+    for pattern in STATE_GLOBS.get(emu, ()):
+        for path in glob.glob(pattern):
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if mtime >= since and (best is None or mtime > best[0]):
+                best = (mtime, path)
+    return best[1] if best else None
+
+
+def wait_for_state(emu, since, timeout=8.0, poll=0.25):
+    """Attend qu'un état tout juste demandé soit entièrement écrit ; son chemin, ou None."""
+    end = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < end:
+        path = newest_state(emu, since)
+        if path:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            if size and last == (path, size):
+                return path
+            last = (path, size)
+        time.sleep(poll)
+    return None
+
+
+def _load():
+    return read_json(RESUME_PATH, {}) or {}
+
+
+def record(rom, emu, state):
+    data = _load()
+    data[rom] = {"emu": emu, "state": state, "build": build(emu), "ts": time.time()}
+    if len(data) > KEEP:
+        for key, _ in sorted(data.items(), key=lambda kv: kv[1].get("ts", 0))[:len(data) - KEEP]:
+            data.pop(key)
+    write_json(RESUME_PATH, data)
+
+
+def state_for(rom, emu):
+    """État à recharger pour ce jeu : même émulateur, fichier toujours là (et même version pour PCSX2)."""
+    item = _load().get(rom) or {}
+    state = item.get("state")
+    if item.get("emu") != emu or not state or not os.path.exists(state):
+        return None
+    if emu in STRICT_BUILD and item.get("build") != build(emu):
+        return None
+    return state
+
+
+def has_resume(rom):
+    """Une reprise est prévue pour ce jeu (n'importe quel émulateur, RetroArch compris)."""
+    item = _load().get(rom) or {}
+    return bool(item and state_for(rom, item.get("emu"))) or bool(_retroarch_auto_states(rom))
+
+
+def _retroarch_auto_states(rom):
+    stem = glob.escape(os.path.splitext(os.path.basename(rom))[0])
+    return glob.glob(os.path.join(RA_DIR, "states", stem + ".state.auto")) + \
+        glob.glob(os.path.join(RA_DIR, "states", "*", stem + ".state.auto"))
+
+
+def _drop(rom):
+    data = _load()
+    if data.pop(rom, None) is not None:
+        write_json(RESUME_PATH, data)
+
+
+def forget(rom):
+    """« Recommencer depuis le début » : plus de reprise pour ce jeu (l'état de RetroArch est gardé
+    de côté en .old, au cas où)."""
+    _drop(rom)
+    for path in _retroarch_auto_states(rom):
+        try:
+            os.replace(path, path + ".old")
+        except OSError:
+            pass
+
+
+def find_rom(args):
+    """Le jeu dans une ligne de commande d'émulateur : le dernier argument qui est un fichier."""
+    for arg in reversed(args):
+        if not arg.startswith("-") and os.path.isfile(arg):
+            return os.path.normpath(os.path.abspath(arg))
+    return None
+
+
+def retroarch_config(on, path=RA_CFG):
+    """Sauvegarde et rechargement automatiques de RetroArch selon le réglage."""
+    value = "true" if on else "false"
+    want = {"savestate_auto_save": value, "savestate_auto_load": value}
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return False
+    seen, changed = set(), False
+    for i, line in enumerate(lines):
+        m = re.match(r"\s*([A-Za-z0-9_]+)\s*=", line)
+        if m and m.group(1) in want:
+            new = f'{m.group(1)} = "{want[m.group(1)]}"'
+            changed |= line != new
+            lines[i] = new
+            seen.add(m.group(1))
+    for key in want:
+        if key not in seen:
+            lines.append(f'{key} = "{want[key]}"')
+            changed = True
+    if changed:
+        atomic_write(path, "\n".join(lines) + "\n")
+    return changed
+
+
+def command(emu, args, on=None):
+    """(commande à lancer, jeu, état rechargé, recharger par raccourci après le lancement)."""
+    on = enabled() if on is None else on
+    rom = find_rom(args)
+    extra, state, hotkey = [], None, False
+    if emu == "retroarch":
+        retroarch_config(on)
+    elif on and rom:
+        state = state_for(rom, emu)
+        if state and emu == "dolphin":
+            extra = ["-s", state]
+        elif state and emu == "pcsx2":
+            extra = ["-statefile", state]
+        elif state and emu == "azahar":
+            hotkey = True
+    return ["flatpak", "run", FLATPAKS[emu]] + extra + list(args), rom, state, hotkey
+
+
+def after_exit(emu, rom, started, loaded_state, ran_for):
+    """À la fermeture : retient l'état écrit pendant la partie. Sinon (plantage, coupure, jeu quitté
+    autrement que par la console), l'ancien état est oublié : il daterait d'avant cette partie, et
+    le reprendre ferait perdre ce qui vient d'être joué ou sauvegardé dans le jeu. De même pour un
+    état qui a empêché PCSX2 de démarrer."""
+    if not rom or emu == "retroarch":
+        return None
+    state = newest_state(emu, started - 1)
+    if state:
+        record(rom, emu, state)
+        return state
+    if ran_for > 60 or (loaded_state and emu == "pcsx2"):
+        _drop(rom)
+    return None

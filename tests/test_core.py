@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -183,7 +184,8 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(rec[0]["name"], "Metroid Prime")
         self.assertTrue(rec[0]["direct"])
         cmd = library.command("gc", rec[0]["path"])
-        self.assertEqual(cmd[:3], ["flatpak", "run", "org.DolphinEmu.dolphin-emu"])
+        self.assertTrue(cmd[0].endswith("/bin/console-emu"))                 # reprise des parties
+        self.assertEqual(cmd[1:], ["dolphin", "-b", "-e", rec[0]["path"]])
 
     def test_set_startup(self):
         library.set_startup("ps2")
@@ -549,6 +551,263 @@ class ExclusivePadTests(unittest.TestCase):
                                      9: (0, 1023), 10: (0, 1023)}
         ble = self.gp.raw_layout(self.FakeDevice("/x"), "xbox")["axes"]   # Xbox BLE, pilote générique
         self.assertEqual((ble[10][0], ble[9][0], ble[2][0], ble[5][0]), (4, 5, 2, 3))
+
+
+class CoversTests(unittest.TestCase):
+    """Jaquettes automatiques : correspondance des noms, choix de la version, téléchargement."""
+
+    NAMES = [
+        "Pokemon - Emerald Version (USA, Europe).png", "Pokemon - Emerald Version (USA, Europe) (Alternate).png",
+        "Pokemon - Version Emeraude (France).png",
+        "Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De,Es,It).png",
+        "Legend of Zelda, The - The Minish Cap (USA).png",
+        "Legend of Zelda, The - The Minish Cap (USA) (Demo) (Kiosk).png",
+        "Legend of Zelda, The - A Link to the Past _ Four Swords (Europe) (En,Fr,De,Es,It).png",
+        "Advance Wars (Europe) (En,Fr,De,Es).png", "Advance Wars 2 - Black Hole Rising (Europe) (En,Fr,De,Es,It).png",
+        "Top Spin 2 (Europe) (En,Fr,De,Es,It).png", "Fire Pro Wrestling A (Japan).png",
+        "Final Fantasy VII (Europe) (Disc 1).png", "Final Fantasy VII (France) (Disc 1).png",
+        "Final Fantasy VII (France) (Disc 2).png", "Final Fantasy VII (USA) (Disc 1).png",
+        "Golden Sun (Europe).png", "Golden Sun (France).png", "Golden Sun (USA).png",
+        "Spider-Man 2 (Europe).png", "1080° Avalanche (Europe).png",
+    ]
+
+    def setUp(self):
+        from consoleshell import covers
+        self.covers = covers
+        self.index = covers.Index(self.NAMES)
+
+    def test_title_key(self):
+        k = self.covers.title_key
+        self.assertEqual(k("Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De)"), "legend zelda minish cap")
+        self.assertEqual(k("The Legend of Zelda: The Minish Cap [!]"), "legend zelda minish cap")
+        self.assertEqual(k("Pokémon Émeraude"), "pokemon emeraude")
+        self.assertEqual(k("Final Fantasy VII"), k("Final Fantasy 7"))
+        self.assertEqual(k("Kirby's Dream Land"), "kirbys dream land")
+
+    def test_tags(self):
+        t = self.covers.tag_info
+        self.assertEqual(t("X (USA, Europe)")["regions"], {"us", "eu"})
+        self.assertEqual(t("X (UE) [!]")["regions"], {"us", "eu"})
+        self.assertEqual(t("X (F)")["regions"], {"fr"})
+        self.assertEqual(t("X (Europe) (En,Fr,De)")["langs"], {"en", "fr", "de"})
+        self.assertEqual(t("X (France) (Disc 2)")["disc"], 2)
+        self.assertTrue(t("X (USA) (Rev 1)")["rev"])
+        self.assertEqual(t("X (USA) (Demo) (Kiosk)")["bad"], {"demo", "kiosk"})
+        self.assertEqual(t("X (USA) (Alternate)")["bad"], {"alt"})
+
+    def test_match(self):
+        m = self.index.match
+        self.assertEqual(m("Pokemon - Emerald Version (USA, Europe).gba"), "Pokemon - Emerald Version (USA, Europe).png")
+        self.assertEqual(m("Pokemon Emerald (U) [!].gba"), "Pokemon - Emerald Version (USA, Europe).png")   # pas « Alternate »
+        self.assertEqual(m("pokemon_emerald.gba"), "Pokemon - Emerald Version (USA, Europe).png")
+        self.assertEqual(m("1986 - Pokemon Emerald (U)(TrashMan).gba"), "Pokemon - Emerald Version (USA, Europe).png")
+        self.assertEqual(m("Pokémon Émeraude.gba"), "Pokemon - Version Emeraude (France).png")
+        self.assertEqual(m("The Legend of Zelda - The Minish Cap (U).gba"), "Legend of Zelda, The - The Minish Cap (USA).png")
+        self.assertEqual(m("Zelda Minish Cap.gba"), "Legend of Zelda, The - The Minish Cap (Europe) (En,Fr,De,Es,It).png")
+        self.assertEqual(m("Legend of Zelda, The - A Link to the Past & Four Swords (Europe) (En,Fr,De,Es,It).gba"),
+                         "Legend of Zelda, The - A Link to the Past _ Four Swords (Europe) (En,Fr,De,Es,It).png")
+        self.assertEqual(m("Advance Wars 2.gba"), "Advance Wars 2 - Black Hole Rising (Europe) (En,Fr,De,Es,It).png")
+        self.assertEqual(m("Advance Wars.gba"), "Advance Wars (Europe) (En,Fr,De,Es).png")
+        self.assertEqual(m("Golden Sun.gba"), "Golden Sun (France).png")                    # console française
+        self.assertEqual(m("Golden Sun (USA).gba"), "Golden Sun (USA).png")                 # sa propre région d'abord
+        self.assertEqual(m("Final Fantasy VII (France).m3u"), "Final Fantasy VII (France) (Disc 1).png")
+        self.assertEqual(m("Final Fantasy VII (France) (Disc 2).chd"), "Final Fantasy VII (France) (Disc 2).png")
+        self.assertEqual(m("Final Fantasy 7 - Disc 2.chd"), "Final Fantasy VII (France) (Disc 2).png")
+        self.assertEqual(m("Spiderman 2.iso"), "Spider-Man 2 (Europe).png")
+        self.assertEqual(m("1080 Avalanche.rvz"), "1080° Avalanche (Europe).png")
+        # Jamais une autre suite ni un autre jeu au nom voisin
+        self.assertIsNone(m("Top Spin.iso"))
+        self.assertIsNone(m("Fire Pro Wrestling Z.iso"))
+        self.assertIsNone(m("Pokemon.gba"))
+
+    def test_parse_index(self):
+        page = ('<html><body><h1>Index of /Nintendo - Game Boy Advance/Named_Boxarts/</h1><a href="../">../</a>\n'
+                '<a href="?C=N;O=D">Name</a>\n'
+                '<a href="Advance%20Wars%20%28Europe%29%20%28En%2CFr%2CDe%2CEs%29.png">Advance Wars (Europe)...</a>\n'
+                '<a href="/Nintendo%20-%20Game%20Boy%20Advance/Named_Boxarts/Golden%20Sun%20%28France%29.png">x</a>\n'
+                '<a href="Tom%20%26amp%3B%20Jerry.jpg">y</a></body></html>')
+        self.assertEqual(self.covers.parse_index(page),
+                         ["Advance Wars (Europe) (En,Fr,De,Es).png", "Golden Sun (France).png", "Tom &amp; Jerry.jpg"])
+
+    def test_run_downloads_where_esde_looks(self):
+        import urllib.parse
+        from unittest import mock
+        covers = self.covers
+        roms = os.path.join(TMP_HOME, "ROMs")
+        for rel in ("gba/Golden Sun.gba", "gba/Inconnu du tout.gba", "psx/Final Fantasy VII (France)/FF7 - Disc 1.cue",
+                    "psx/Final Fantasy VII (France)/FF7 - Disc 1 (Track 2).bin", "psx/Crash.chd"):
+            os.makedirs(os.path.dirname(os.path.join(roms, rel)), exist_ok=True)
+            open(os.path.join(roms, rel), "w").close()
+        # Une jaquette existe déjà (scrapée par ES-DE) : on n'y touche pas.
+        done = os.path.join(library.MEDIA_DIR, "psx", "covers", "Crash.png")
+        os.makedirs(os.path.dirname(done), exist_ok=True)
+        with open(done, "wb") as f:
+            f.write(b"scrapee")
+        png = b"\x89PNG\r\n\x1a\n" + b"0" * 3000
+        listings = {("gba", "Named_Boxarts"): ["Golden Sun (France).png", "Golden Sun (USA).png"],
+                    ("gba", "Named_Snaps"): ["Golden Sun (USA).png"],
+                    ("psx", "Named_Boxarts"): ["Final Fantasy VII (France) (Disc 1).png", "Crash Bandicoot (Europe).png"],
+                    ("psx", "Named_Snaps"): ["Crash Bandicoot (Europe).png"]}
+        calls = []
+
+        def fake_get(url, timeout=25):
+            calls.append(url)
+            path = urllib.parse.unquote(url.split("://", 1)[1].split("/", 1)[1])
+            for (system, folder), names in listings.items():
+                base = f"{covers.SYSTEM_NAMES[system]}/{folder}/"
+                if path == base:
+                    return "".join(f'<a href="{urllib.parse.quote(n)}">{n}</a>' for n in names).encode()
+                if path.startswith(base) and path[len(base):] in names:
+                    return png
+            raise OSError("404")
+        with mock.patch.object(covers, "_get", fake_get), mock.patch.object(covers.time, "sleep", lambda s: None):
+            stats = covers.run()
+        self.assertEqual(stats["added"], 2)
+        self.assertEqual(stats["missing"], 1)                                   # « Inconnu du tout »
+        self.assertFalse(stats["offline"])
+        self.assertTrue(os.path.exists(os.path.join(library.MEDIA_DIR, "gba", "covers", "Golden Sun.png")))
+        self.assertTrue(os.path.exists(os.path.join(library.MEDIA_DIR, "gba", "screenshots", "Golden Sun.png")))
+        ff7 = os.path.join(library.MEDIA_DIR, "psx", "covers", "Final Fantasy VII (France)", "FF7 - Disc 1.png")
+        self.assertTrue(os.path.exists(ff7))
+        self.assertFalse(os.path.exists(os.path.join(library.MEDIA_DIR, "psx", "covers", "Final Fantasy VII (France)",
+                                                     "FF7 - Disc 1 (Track 2).png")))
+        with open(done, "rb") as f:
+            self.assertEqual(f.read(), b"scrapee")
+        self.assertEqual(library.media("psx", os.path.join(roms, "psx", "Final Fantasy VII (France)", "FF7 - Disc 1.cue")), ff7)
+        # Deuxième passage : rien à retélécharger, et l'introuvable n'est pas recherché de nouveau.
+        calls.clear()
+        with mock.patch.object(covers, "_get", fake_get):
+            again = covers.run()
+        self.assertEqual((again["added"], again["missing"]), (0, 1))
+        self.assertEqual(calls, [])
+
+
+class ResumeTests(unittest.TestCase):
+    """Reprise des parties : état ajouté au lancement, état retenu à la fermeture, lanceur console-emu."""
+
+    def setUp(self):
+        from consoleshell import resume
+        self.resume = resume
+        self.rom = os.path.join(TMP_HOME, "Reprise", "ps2", "Okami (Europe).chd")
+        os.makedirs(os.path.dirname(self.rom), exist_ok=True)
+        open(self.rom, "w").close()
+        for path in (resume.RESUME_PATH, os.path.join(TMP_HOME, ".config", "console", "settings.json")):
+            if os.path.exists(path):
+                os.unlink(path)
+        self._build("pcsx2", "aaa111")
+
+    def _build(self, emu, commit):
+        """Faux déploiement Flatpak (le « commit » sert de numéro de version)."""
+        cur = os.path.join(TMP_HOME, ".local/share/flatpak/app", self.resume.FLATPAKS[emu], "current")
+        os.makedirs(cur, exist_ok=True)
+        link = os.path.join(cur, "active")
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(commit, link)
+
+    def _state(self, emu, name):
+        folder = os.path.dirname(self.resume.STATE_GLOBS[emu][0])
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name)
+        with open(path, "wb") as f:
+            f.write(b"etat" * 100)
+        return path
+
+    def test_command_adds_state_only_when_known_and_same_version(self):
+        r = self.resume
+        args = ["-batch", "-fullscreen", "--", self.rom]
+        cmd, rom, state, hotkey = r.command("pcsx2", args, on=True)
+        self.assertEqual(cmd, ["flatpak", "run", "net.pcsx2.PCSX2"] + args)
+        self.assertEqual(rom, self.rom)
+        st = self._state("pcsx2", "SLES-54439 (12345678).resume.p2s")
+        r.record(self.rom, "pcsx2", st)
+        cmd, _, state, _ = r.command("pcsx2", args, on=True)
+        self.assertEqual(cmd, ["flatpak", "run", "net.pcsx2.PCSX2", "-statefile", st] + args)
+        self.assertEqual(r.command("pcsx2", args, on=False)[0], ["flatpak", "run", "net.pcsx2.PCSX2"] + args)
+        self._build("pcsx2", "bbb222")                                # PCSX2 mis à jour : état ignoré
+        self.assertIsNone(r.command("pcsx2", args, on=True)[2])
+
+    def test_dolphin_and_azahar(self):
+        r = self.resume
+        gc = os.path.join(TMP_HOME, "Reprise", "gc", "Wind Waker.rvz")
+        os.makedirs(os.path.dirname(gc), exist_ok=True)
+        open(gc, "w").close()
+        self._build("dolphin", "d1")
+        st = self._state("dolphin", "GZLP01.s08")
+        r.record(gc, "dolphin", st)
+        cmd = r.command("dolphin", ["-b", "-e", gc], on=True)[0]
+        self.assertEqual(cmd, ["flatpak", "run", "org.DolphinEmu.dolphin-emu", "-s", st, "-b", "-e", gc])
+        self._build("dolphin", "d2")                     # mis à jour : Dolphin ignorera l'état s'il est trop vieux
+        self.assertEqual(r.command("dolphin", ["-b", "-e", gc], on=True)[0][3:5], ["-s", st])
+        ds = os.path.join(TMP_HOME, "Reprise", "n3ds", "Zelda.3ds")
+        os.makedirs(os.path.dirname(ds), exist_ok=True)
+        open(ds, "w").close()
+        self._build("azahar", "z1")
+        r.record(ds, "azahar", self._state("azahar", "0004000000033500.01.cst"))
+        cmd, _, _, hotkey = r.command("azahar", ["-f", ds], on=True)
+        self.assertEqual(cmd, ["flatpak", "run", "org.azahar_emu.Azahar", "-f", ds])  # pas d'option : raccourci
+        self.assertTrue(hotkey)
+
+    def test_after_exit_records_newest_state_and_forgets_refused_one(self):
+        r = self.resume
+        started = time.time()
+        self.assertIsNone(r.after_exit("pcsx2", self.rom, started, None, 300))     # rien d'écrit
+        st = self._state("pcsx2", "SLES-54439 (12345678).resume.p2s")
+        self.assertEqual(r.after_exit("pcsx2", self.rom, started, None, 300), st)
+        self.assertEqual(r.state_for(self.rom, "pcsx2"), st)
+        # PCSX2 a refusé l'état (quitte aussitôt sans rien écrire) : la prochaine fois, partie neuve
+        r.after_exit("pcsx2", self.rom, time.time() + 5, st, 3)
+        self.assertIsNone(r.state_for(self.rom, "pcsx2"))
+        # Partie quittée sans nouvel état (plantage…) : l'ancien, plus vieux que la partie, est oublié
+        r.record(self.rom, "pcsx2", st)
+        r.after_exit("pcsx2", self.rom, time.time() + 5, None, 600)
+        self.assertIsNone(r.state_for(self.rom, "pcsx2"))
+
+    def test_retroarch_config_and_forget(self):
+        r = self.resume
+        os.makedirs(os.path.dirname(r.RA_CFG), exist_ok=True)
+        with open(r.RA_CFG, "w", encoding="utf-8") as f:
+            f.write('video_fullscreen = "true"\nsavestate_auto_save = "false"\n')
+        self.assertTrue(r.retroarch_config(True))
+        self.assertFalse(r.retroarch_config(True))                              # déjà bon : pas réécrit
+        with open(r.RA_CFG, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn('savestate_auto_save = "true"', text)
+        self.assertIn('savestate_auto_load = "true"', text)
+        self.assertIn('video_fullscreen = "true"', text)
+        gba = os.path.join(TMP_HOME, "Reprise", "gba", "Golden Sun [!].gba")
+        auto = os.path.join(r.RA_DIR, "states", "mGBA", "Golden Sun [!].state.auto")
+        os.makedirs(os.path.dirname(auto), exist_ok=True)
+        open(auto, "w").close()
+        self.assertTrue(r.has_resume(gba))
+        r.forget(gba)
+        self.assertFalse(os.path.exists(auto))
+        self.assertTrue(os.path.exists(auto + ".old"))
+        self.assertFalse(r.has_resume(gba))
+
+    def test_console_emu_wrapper(self):
+        """Lanceur réel, avec un faux « flatpak » qui joue l'émulateur : il note ses arguments et écrit
+        un état de reprise, comme PCSX2 en quittant."""
+        bindir = tempfile.mkdtemp()
+        log_path = os.path.join(bindir, "args.txt")
+        state_dir = os.path.dirname(self.resume.STATE_GLOBS["pcsx2"][0])
+        with open(os.path.join(bindir, "flatpak"), "w") as f:
+            f.write("#!/bin/sh\n"
+                    f'printf "%s\\n" "$*" >> "{log_path}"\n'
+                    f'mkdir -p "{state_dir}" && printf "%0500d" 0 > "{state_dir}/SLES-1 (0000ABCD).resume.p2s"\n'
+                    "exit 3\n")
+        os.chmod(os.path.join(bindir, "flatpak"), 0o755)
+        env = dict(os.environ, HOME=TMP_HOME, PATH=bindir + os.pathsep + os.environ["PATH"])
+        emu = os.path.join(ROOT, "shell", "bin", "console-emu")
+        for _ in range(2):
+            p = subprocess.run([sys.executable, emu, "pcsx2", "-batch", "--", self.rom], env=env,
+                               capture_output=True, text=True, timeout=30)
+            self.assertEqual(p.returncode, 3, p.stderr)                  # code de sortie de l'émulateur
+        with open(log_path) as f:
+            calls = f.read().splitlines()
+        state = os.path.join(state_dir, "SLES-1 (0000ABCD).resume.p2s")
+        self.assertEqual(calls[0], f"run net.pcsx2.PCSX2 -batch -- {self.rom}")
+        self.assertEqual(calls[1], f"run net.pcsx2.PCSX2 -statefile {state} -batch -- {self.rom}")
 
 
 if __name__ == "__main__":
