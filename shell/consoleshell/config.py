@@ -48,6 +48,12 @@ DEFAULTS = {
     "moonlight_host": "",                       # PC par défaut (uuid) ; vide = le premier associé
     "moonlight_tile_app": "Steam Big Picture",  # lancé par la tuile ; "gui" = interface Moonlight
     "moonlight_pin_mode": "wake",               # wake = après réveil du PC | always | off
+    "sunshine_auto_repair": True,               # relance Sunshine s'il est à moitié planté
+    "wake_relay": "",                           # utilisateur@hôte sur le réseau du PC (réveil par SSH)
+    "pc_ssh": "",                               # utilisateur@PC : veille / redémarrage par OpenSSH (Windows)
+    "theme": "aurora",                          # thème de l'accueil (voir THEMES dans home.js)
+    "bg_motion": "full",                        # full | calm | off
+    "ambient_min": 5,                           # mode ambiance après N min sans activité (0 = jamais)
 }
 
 

@@ -248,6 +248,160 @@ class IniSetTests(unittest.TestCase):
         self.assertTrue(text.rstrip().endswith("[LE]\nMinConnectionInterval = 7"))
 
 
+class HealthTests(unittest.TestCase):
+    def _tree(self, files):
+        root = tempfile.mkdtemp()
+        for rel, content in files.items():
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(content)
+        return root
+
+    def test_temperatures_memory_readonly(self):
+        from consoleshell import health
+        sysfs = self._tree({"class/hwmon/hwmon0/name": "acpitz\n", "class/hwmon/hwmon1/name": "coretemp\n",
+                            "class/hwmon/hwmon1/temp1_input": "61000\n", "class/hwmon/hwmon2/name": "nvme\n",
+                            "class/hwmon/hwmon2/temp1_input": "43850\n"})
+        self.assertEqual(health.temperatures(sysfs), {"cpu": 61.0, "ssd": 43.9})
+        fallback = self._tree({"class/thermal/thermal_zone0/type": "x86_pkg_temp", "class/thermal/thermal_zone0/temp": "72000"})
+        self.assertEqual(health.temperatures(fallback)["cpu"], 72.0)
+        proc = self._tree({"meminfo": "MemTotal:        7864320 kB\nMemFree: 100 kB\nMemAvailable:    2097152 kB\n",
+                           "mounts": "/dev/nvme0n1p2 / ext4 ro,relatime,errors=remount-ro 0 0\n"})
+        self.assertEqual(health.memory(proc), {"total": 7864320 * 1024, "available": 2097152 * 1024})
+        self.assertTrue(health.root_readonly(proc))
+
+    def test_smart_and_warnings(self):
+        from consoleshell import health
+        smart = {"model_name": "INTEL SSDPEKNW512G8", "smart_status": {"passed": True},
+                 "nvme_smart_health_information_log": {"critical_warning": 0, "temperature": 41, "available_spare": 100,
+                                                       "percentage_used": 1, "media_errors": 0, "unsafe_shutdowns": 82,
+                                                       "power_on_hours": 437}}
+        s = health.smart_summary(smart)
+        self.assertEqual((s["model"], s["percentage_used"], s["unsafe_shutdowns"]), ("INTEL SSDPEKNW512G8", 1, 82))
+        ok = {"ssd": s, "io_errors": 0, "disk": {"free": 200e9}, "temps": {"cpu": 55}, "memory": {"available": 3e9},
+              "tailscale": {"running": True}}
+        self.assertEqual(health.warnings(ok), [])
+        bad = dict(ok, io_errors=7, readonly=True, tailscale={"running": False}, disk={"free": 4e9})
+        levels = [w["level"] for w in health.warnings(bad, pcs=[{"name": "PC", "online": True, "sunshine": "half"}],
+                                                      pads=[{"name": "Manette", "battery": 15}])]
+        self.assertEqual(levels, ["bad", "bad", "warn", "warn", "warn", "warn"])
+
+
+class BatteryTests(unittest.TestCase):
+    def test_low_battery_thresholds(self):
+        from consoleshell.util import battery_alert
+        seq, last, alerts = [80, 35, 21, 19, 18, 12, 9, 6, 4, 3, 40, 15], None, []
+        for pct in seq:
+            if pct >= 30:
+                last = None
+            lvl = battery_alert(pct, last)
+            if lvl:
+                last = lvl
+                alerts.append((pct, lvl))
+        self.assertEqual(alerts, [(19, 20), (9, 10), (4, 5), (15, 20)])
+        self.assertIsNone(battery_alert(None, None))
+
+
+class PcRemoteTests(unittest.TestCase):
+    """PC distant : santé de Sunshine (demi-plantage), relance, réveil par relais."""
+
+    def _server(self, behaviour):
+        """Serveur TCP local : « close » répond en fermant (comme un refus TLS), « silent » accepte et se tait."""
+        import socket
+        import threading
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(8)
+        conns = []
+
+        def loop():
+            while True:
+                try:
+                    c, _ = srv.accept()
+                except OSError:
+                    return
+                conns.append(c)
+                if behaviour == "close":
+                    c.close()
+        threading.Thread(target=loop, daemon=True).start()
+        self.addCleanup(lambda: ([c.close() for c in conns], srv.close()))
+        return srv.getsockname()[1]
+
+    def _serverinfo(self, https_port):
+        import http.server
+        import threading
+        xml = (f'<root status_code="200"><hostname>PC-SALON</hostname><HttpsPort>{https_port}</HttpsPort>'
+               f'<state>SUNSHINE_SERVER_FREE</state></root>').encode()
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(xml)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        return srv.server_address[1]
+
+    def test_https_alive(self):
+        from consoleshell import pcremote
+        self.assertTrue(pcremote.https_alive("127.0.0.1", self._server("close"), timeout=1))
+        self.assertFalse(pcremote.https_alive("127.0.0.1", self._server("silent"), timeout=0.5))
+        self.assertFalse(pcremote.https_alive("127.0.0.1", 9, timeout=0.5))      # rien n'écoute
+
+    def test_check_detects_half_crash(self):
+        from consoleshell import pcremote
+        for behaviour, expected in (("close", "ok"), ("silent", "half")):
+            https = self._server(behaviour)
+            host = {"uuid": "u", "addresses": [("127.0.0.1", self._serverinfo(https))]}
+            orig = pcremote.https_alive
+            pcremote.https_alive = lambda a, p, timeout=3.0: orig(a, p, timeout=0.5)
+            try:
+                st = pcremote.check(host)
+            finally:
+                pcremote.https_alive = orig
+            self.assertEqual((st["online"], st["https_port"], st["sunshine"]), (True, https, expected))
+
+    def test_restart_outcomes(self):
+        from consoleshell import pcremote
+        st = {"address": "127.0.0.1", "port": 47989, "https_port": 47984}
+        creds = {"user": "u", "password": "p"}
+        saved = pcremote.api, pcremote.https_alive, pcremote.time.sleep
+        pcremote.time.sleep = lambda s: None
+        try:
+            for api_result, alive, expected in (((401, ""), True, "auth"), ((None, "Connection refused"), True, "unreachable"),
+                                                ((0, "connexion coupée"), True, "ok"), ((None, "timed out"), True, "ok"),
+                                                ((200, "{}"), False, "stuck")):
+                pcremote.api = lambda *a, r=api_result, **k: r
+                pcremote.https_alive = lambda *a, v=alive, **k: v
+                self.assertEqual(pcremote.restart_sunshine(st, creds, wait=0.05), expected, api_result)
+        finally:
+            pcremote.api, pcremote.https_alive, pcremote.time.sleep = saved
+
+    def test_relay_wake_command(self):
+        import shlex
+        from consoleshell import pcremote
+        parts = shlex.split(pcremote.relay_wake_command("AA:BB:CC:DD:EE:0F"))
+        self.assertEqual(parts[:2], ["python3", "-c"])
+        compile(parts[2], "wol", "exec")                     # Python valide côté relais
+        self.assertIn("bytes.fromhex('aabbccddee0f')", parts[2])
+        self.assertEqual(parts[3:], ["||", "wakeonlan", "aa:bb:cc:dd:ee:0f"])
+        with self.assertRaises(ValueError):
+            pcremote.relay_wake_command("")
+
+    def test_credentials_are_secret(self):
+        from consoleshell import config, pcremote
+        pcremote.save_credentials("pc1", "joueur", "s3cret")
+        self.assertEqual(pcremote.credentials("pc1"), {"user": "joueur", "password": "s3cret"})
+        self.assertEqual(os.stat(config.SECRETS_PATH).st_mode & 0o777, 0o600)
+        pcremote.save_credentials("pc1", "", "")
+        self.assertIsNone(pcremote.credentials("pc1"))
+
+
 class ThreadTests(unittest.TestCase):
     def test_threads_dont_shadow_thread_internals(self):
         # Python 3.13 range un objet dans Thread._handle : une méthode « _handle » le masquait

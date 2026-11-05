@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# Configuration du PC distant (Moonlight). À lancer en SSH sur la console, sous ton utilisateur.
+#
+#   console-pc-setup relais pi@raspberrypi.local
+#       Un appareil toujours allumé sur le réseau du PC (Raspberry…) réveille le PC à ta place.
+#       Le mot de passe de cet appareil est demandé une seule fois (installation de la clé de la console).
+#
+#   console-pc-setup pc TonNomWindows@100.x.y.z
+#       Veille, redémarrage et arrêt du PC depuis la console. Il faut d'abord activer sur le PC :
+#       Paramètres › Système › Fonctionnalités facultatives › Serveur OpenSSH.
+#       Le mot de passe Windows est demandé une seule fois (installation de la clé de la console).
+#
+#   console-pc-setup sunshine TonIdentifiantSunshine
+#       Même chose que Réglages › Moonlight › Identifiant Sunshine, depuis le terminal.
+#
+#   console-pc-setup test
+#       Vérifie tout ce qui est configuré.
+set -euo pipefail
+KEY="$HOME/.ssh/id_ed25519"
+PREFIX="${CONSOLE_PREFIX:-/opt/console}"
+CTL="$PREFIX/bin/console-ctl"
+SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=8)
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'Erreur : %s\n' "$*" >&2; exit 1; }
+
+ensure_key() {
+  if [[ ! -f $KEY ]]; then
+    mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+    ssh-keygen -q -t ed25519 -N "" -C "console-ux481" -f "$KEY"
+    say "Clé de la console créée ($KEY.pub)."
+  fi
+}
+
+# « utilisateur@nom » → « utilisateur@adresse » si le nom n'est connu que de Tailscale.
+resolve() {
+  local target=$1 user=${1%@*} host=${1#*@} ip
+  [[ $target == *@* ]] || die "forme attendue : utilisateur@appareil"
+  if getent ahosts "$host" >/dev/null 2>&1; then printf '%s\n' "$target"; return; fi
+  ip=$(tailscale ip -4 "$host" 2>/dev/null | head -n1 || true)
+  [[ -n $ip ]] || die "« $host » est introuvable (ni sur le réseau, ni dans Tailscale)."
+  printf '%s@%s\n' "$user" "$ip"
+}
+
+ctl() { "$CTL" "$@" >/dev/null 2>&1 || say "(l'interface n'est pas lancée : réglage pris en compte à son prochain démarrage)"; }
+
+setup_relay() {
+  local target; target=$(resolve "${1:?utilisateur@appareil}")
+  ensure_key
+  say "Installation de la clé de la console sur $target (son mot de passe est demandé une seule fois)…"
+  ssh-copy-id -i "$KEY.pub" "${SSH_OPTS[@]}" "$target"
+  if ! ssh -o BatchMode=yes "${SSH_OPTS[@]}" -i "$KEY" "$target" 'command -v python3 >/dev/null || command -v wakeonlan >/dev/null'; then
+    die "python3 (ou wakeonlan) est nécessaire sur $target pour envoyer le Wake-on-LAN."
+  fi
+  ctl pc-config relay "$target"
+  say "✓ Relais de réveil : $target. La console l'utilisera pour réveiller le PC."
+}
+
+setup_pc() {
+  local target; target=$(resolve "${1:?NomWindows@adresse}")
+  ensure_key
+  local pub; pub=$(cat "$KEY.pub")
+  say "Installation de la clé de la console sur le PC (mot de passe Windows demandé une seule fois)…"
+  # Script PowerShell envoyé sur l'entrée standard : aucun souci de guillemets à travers cmd.exe.
+  # Compte administrateur : la clé va dans administrators_authorized_keys, avec les droits exigés
+  # par OpenSSH (groupes désignés par leur SID pour marcher sur un Windows en français).
+  local out
+  # shellcheck disable=SC2087  # $pub est voulu côté console ; les $ de PowerShell sont échappés
+  out=$(ssh "${SSH_OPTS[@]}" "$target" 'powershell -NoProfile -Command -' 2>&1 <<PS
+\$k = '$pub'
+\$adm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (\$adm) { \$f = Join-Path \$env:ProgramData 'ssh\administrators_authorized_keys' } else { \$d = Join-Path \$env:USERPROFILE '.ssh'; New-Item -ItemType Directory -Force -Path \$d | Out-Null; \$f = Join-Path \$d 'authorized_keys' }
+if (-not (Test-Path \$f) -or -not (Select-String -Path \$f -SimpleMatch -Quiet -Pattern \$k)) { Add-Content -Path \$f -Value \$k -Encoding ascii }
+if (\$adm) { icacls.exe \$f /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null }
+Write-Output 'CLE-INSTALLEE'
+PS
+  ) || true
+  [[ $out == *CLE-INSTALLEE* ]] || die "la clé n'a pas pu être installée (serveur OpenSSH actif sur le PC ? bon mot de passe ?)"
+  out=$(ssh -o BatchMode=yes "${SSH_OPTS[@]}" -i "$KEY" "$target" "echo ok" 2>&1 | tr -d '\r') || true
+  [[ $out == *ok* ]] || die "la clé est installée mais la connexion sans mot de passe échoue."
+  ctl pc-config ssh "$target"
+  say "✓ Veille, redémarrage et arrêt du PC disponibles (menu du PC sur l'étagère Moonlight)."
+}
+
+setup_sunshine() {
+  local user=${1:?identifiant Sunshine} pw
+  read -rsp "Mot de passe Sunshine : " pw; echo
+  SUNSHINE_USER="$user" SUNSHINE_PW="$pw" PYTHONPATH="$PREFIX" python3 - <<'PY'
+import os, sys
+from consoleshell import moonlight, pcremote
+from consoleshell.config import Settings
+hosts = moonlight.load_hosts()
+if not hosts:
+    sys.exit("Aucun PC associé à Moonlight.")
+want = Settings()["moonlight_host"]
+host = next((h for h in hosts if h["uuid"] == want), hosts[0])
+creds = {"user": os.environ["SUNSHINE_USER"], "password": os.environ["SUNSHINE_PW"]}
+st = pcremote.check(host)
+res = pcremote.verify_credentials(st, creds) if st.get("online") else "offline"
+if res == "auth":
+    sys.exit("Sunshine refuse cet identifiant ou ce mot de passe.")
+pcremote.save_credentials(host["uuid"], creds["user"], creds["password"])
+print(f"✓ Identifiant Sunshine enregistré pour {host['name']}" + (" (PC injoignable : non vérifié)" if res != "ok" else " et vérifié."))
+PY
+}
+
+run_test() {
+  PYTHONPATH="$PREFIX" python3 - <<'PY'
+from consoleshell import moonlight, pcremote
+from consoleshell.config import Settings
+s = Settings()
+for h in moonlight.load_hosts():
+    st = pcremote.check(h)
+    state = ("Sunshine OK" if st.get("sunshine") == "ok" else "Sunshine BLOQUÉ (port appairé muet)") if st.get("online") else "ne répond pas"
+    print(f"PC {h['name']} : {state}" + (f" via {st['address']}" if st.get("address") else ""))
+    print(f"  identifiant Sunshine : {'enregistré' if pcremote.credentials(h['uuid']) else 'non défini'}")
+for key, label, cmd in (("wake_relay", "relais de réveil", "true"), ("pc_ssh", "SSH du PC", "echo ok")):
+    target = s[key]
+    if not target:
+        print(f"{label} : non configuré")
+        continue
+    code, out, err = pcremote.run(pcremote.ssh_cmd(pcremote.resolve(target), cmd), timeout=15)
+    print(f"{label} : {target} → {'OK' if code == 0 else 'ÉCHEC ' + (err or out).strip()[-120:]}")
+PY
+}
+
+case "${1:-}" in
+  relais|relay) shift; setup_relay "$@" ;;
+  pc) shift; setup_pc "$@" ;;
+  sunshine) shift; setup_sunshine "$@" ;;
+  test|etat|état) run_test ;;
+  *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

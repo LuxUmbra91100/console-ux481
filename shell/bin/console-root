@@ -59,6 +59,22 @@ mem_sleep() {
     > /etc/systemd/sleep.conf.d/60-console-memsleep.conf
 }
 
+# Lecture seule : état SMART du disque système et erreurs d'accès relevées par le noyau depuis
+# le démarrage (Réglages › Santé). Sortie JSON.
+health() {
+  local src dev smart='null' io
+  src=$(findmnt -no SOURCE / 2>/dev/null)
+  dev=$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1)
+  [[ $dev =~ ^[a-z0-9]+$ ]] || dev=nvme0n1
+  if command -v smartctl >/dev/null; then
+    smart=$(timeout 15 smartctl -j -a "/dev/$dev" 2>/dev/null) || true
+    [[ $smart == "{"* ]] || smart='null'
+  fi
+  io=$(journalctl -k -b --no-pager -o cat 2>/dev/null \
+         | grep -cE 'I/O error|controller is down|EXT4-fs error|Buffer I/O error') || true
+  printf '{"device": "%s", "smart": %s, "kernel_io_errors": %d}\n' "$dev" "$smart" "${io:-0}"
+}
+
 cmd=${1:-}
 shift || true
 case "$cmd" in
@@ -67,7 +83,8 @@ case "$cmd" in
   screenpad-off) screenpad_off ;;
   rtc-alarm) rtc_alarm "$@" ;;
   mem-sleep) mem_sleep "$@" ;;
-  *) echo "usage : console-root hw-init|post-resume|pre-sleep|screenpad-off|rtc-alarm N|clear|mem-sleep s2idle|deep" >&2
+  health) health ;;
+  *) echo "usage : console-root hw-init|post-resume|pre-sleep|screenpad-off|rtc-alarm N|clear|mem-sleep s2idle|deep|health" >&2
      exit 2 ;;
 esac
 exit 0

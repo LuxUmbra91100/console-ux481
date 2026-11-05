@@ -143,8 +143,13 @@ def boxart(uuid, app_id):
 
 
 def server_status(host):
-    """Interroge http://pc:47989/serverinfo. Renvoie {"online", "busy", "currentgame"}."""
-    for addr, port in host.get("addresses", []):
+    """Interroge http://pc:47989/serverinfo.
+
+    Renvoie {"online", "busy", "currentgame"} et, si le PC répond, l'adresse qui a répondu
+    ("address", "port") et le port HTTPS des appareils appairés ("https_port").
+    """
+    for raw_addr, port in host.get("addresses", []):
+        addr = raw_addr
         if ":" in addr and not addr.startswith("["):
             addr = f"[{addr}]"
         url = f"http://{addr}:{port}/serverinfo"
@@ -162,7 +167,12 @@ def server_status(host):
             game = int(game) if busy else 0
         except ValueError:
             game = 0
-        return {"online": True, "busy": busy, "currentgame": game}
+        try:
+            https_port = int(root.findtext("HttpsPort") or 0) or port - 5
+        except ValueError:
+            https_port = port - 5
+        return {"online": True, "busy": busy, "currentgame": game,
+                "address": raw_addr.strip("[]"), "port": port, "https_port": https_port}
     return {"online": False, "busy": False, "currentgame": 0}
 
 
@@ -251,7 +261,8 @@ def describe(hosts, status):
         st = status.get(h["uuid"], {"online": None})
         current = next((a["name"] for a in h["apps"] if a["id"] and a["id"] == st.get("currentgame")), None)
         out.append({"uuid": h["uuid"], "name": h["name"], "online": st.get("online"), "busy": st.get("busy"),
-                    "current": current, "wol": bool(h["mac"]), "apps": h["apps"]})
+                    "current": current, "wol": bool(h["mac"]), "apps": h["apps"],
+                    "sunshine": st.get("sunshine")})       # ok | half (port appairé muet) | None
     return out
 
 

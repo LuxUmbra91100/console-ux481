@@ -13,7 +13,8 @@
     settings: { console_name: 'Nova', standby_mode: 'deep', deep_sleep_verified: null, auto_standby_min: 15,
       controller_off_standby: true, resolution: '1080p', ui_sounds: false, osk_layout: 'azerty', browser_scale: 1.5,
       guide_hold_ms: 700, first_run_done: !/wizard/.test(location.hash),
-      moonlight_host: '', moonlight_tile_app: 'Steam Big Picture', moonlight_pin_mode: 'wake' },
+      moonlight_host: '', moonlight_tile_app: 'Steam Big Picture', moonlight_pin_mode: 'wake',
+      theme: 'aurora', bg_motion: 'full', ambient_min: 5 },
     tiles: [
       { id: 'moonlight', type: 'moonlight', running: false },
       { id: 'games', type: 'games', running: true },

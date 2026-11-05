@@ -35,6 +35,9 @@
 .qi .meter i { display: block; height: 100%; background: currentColor; }
 .qi.sep { height: 1px; padding: 0; margin: .4rem 1rem; background: var(--line); }
 .qm-foot { margin-top: 1.2rem; display: flex; justify-content: space-between; align-items: center; color: var(--text-3); font-size: .85rem; }
+.pad-batt { display: inline-flex; align-items: center; gap: .3rem; margin-right: .6rem; }
+.pad-batt .icon { width: 1.25rem; height: 1.25rem; }
+.pad-batt.low { color: var(--warn); }
 
 /* ---- Clavier virtuel ---- */
 .osk-dim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(2, 4, 9, .15), rgba(2, 4, 9, .65) 45%);

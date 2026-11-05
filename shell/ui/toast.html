@@ -34,7 +34,7 @@
       setTimeout(() => { el.remove(); if (!active.size) Shell.send('toast-done'); }, 300);
     }
     Shell.on('toast', t => {
-      const el = h(`<div class="toast"><div class="ic ${t.icon === 'warning' ? 'warning' : ''}">${icon(ICON_FOR[t.icon] || 'info')}</div>
+      const el = h(`<div class="toast"><div class="ic ${t.icon === 'warning' || t.icon === 'battery' ? 'warning' : ''}">${icon(ICONS[t.icon] ? t.icon : (ICON_FOR[t.icon] || 'info'))}</div>
         <div><b>${esc(t.text)}</b>${t.sub ? `<span>${esc(t.sub)}</span>` : ''}</div></div>`);
       $('#stack').prepend(el);
       active.add(el);

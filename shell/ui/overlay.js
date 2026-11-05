@@ -105,6 +105,8 @@ function menuItems() {
   it.push({ id: 'screenshot', icon: 'camera', label: 'Capture d\'écran' });
   it.push({ id: 'home', icon: 'home', label: 'Accueil', right: 'l\'appli reste ouverte' });
   if (d.app) it.push({ id: 'close-app', icon: 'power', label: `Fermer ${d.app.title}`, danger: true });
+  const nb = (d.batteries || []).length;
+  if (nb) it.push({ id: 'pads-off', icon: 'gamepad', label: nb > 1 ? 'Éteindre les manettes' : 'Éteindre la manette' });
   it.push({ id: 'standby', icon: 'moon', label: 'Mettre en veille' });
   return it;
 }
@@ -121,7 +123,10 @@ function renderMenu() {
       : x.right ? esc(x.right) : '';
     return `<div class="qi${x.danger ? ' danger' : ''}${n === O.i ? ' focus' : ''}">${icon(x.icon)}<span>${esc(x.label)}</span><span class="right">${right}</span></div>`;
   }).join('');
-  const pads = (d.pads || []).map(p => `${icon('gamepad')} ${typeof p.power === 'number' ? p.power + ' %' : ''}`).join(' ');
+  // Batterie des manettes (BlueZ, au pour cent près) ; à défaut, le niveau approximatif de SDL.
+  const batt = (d.batteries || []).length ? d.batteries.map(b => b.battery)
+    : (d.pads || []).map(p => (typeof p.power === 'number' ? p.power : null));
+  const pads = batt.map(v => `<span class="pad-batt${typeof v === 'number' && v <= 20 ? ' low' : ''}">${icon(typeof v === 'number' ? 'battery' : 'gamepad')}${typeof v === 'number' ? ' ' + v + ' %' : ''}</span>`).join(' ');
   // Le cadre du menu n'est construit qu'à l'ouverture (avec ses animations d'entrée). Ensuite, seules
   // les parties qui changent sont mises à jour : tout reconstruire à chaque appui relançait le fondu du
   // voile et le glissement du panneau, d'où un clignotement pendant la navigation.

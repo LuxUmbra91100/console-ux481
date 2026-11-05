@@ -14,7 +14,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from . import library, moonlight, network  # noqa: E402
+from . import health, library, moonlight, network, pcremote  # noqa: E402
 from .apps import AppManager, profile_for  # noqa: E402
 from .audio import Audio  # noqa: E402
 from .bluetooth import Bluetooth  # noqa: E402
@@ -30,7 +30,7 @@ from .power import Power, mem_sleep_modes  # noqa: E402
 from .sites import PRESETS, Sites, normalize_url  # noqa: E402
 from .swayipc import Sway, SwayEvents  # noqa: E402
 from .ui import HomeWindow, LayerWindow  # noqa: E402
-from .util import every, later, log, on_main, run, run_async, setup_logging, thread  # noqa: E402
+from .util import battery_alert, every, later, log, on_main, run, run_async, setup_logging, thread  # noqa: E402
 
 VERSION = "1.0"
 ROOT_HELPER = ["sudo", "-n", f"{PREFIX}/bin/console-root"]
@@ -74,6 +74,10 @@ class Shell:
         self._outputs_timer = None
         self._profile_name = None
         self.waking = None               # réveil d'un PC Moonlight en cours
+        self._half_seen = {}             # uuid → nombre de sondages « Sunshine à moitié planté » d'affilée
+        self._repairing = set()          # uuid des PC dont Sunshine est en cours de relance
+        self._battery_warned = {}        # manette → dernier seuil de batterie signalé (20, 10, 5)
+        self.ambient = False             # accueil en mode ambiance (interface effacée)
         self.pin_watch = None            # saisie du code PIN Windows en attente
 
         self.home = HomeWindow(self.on_ui)
@@ -159,6 +163,7 @@ class Shell:
             "sleep": {"modes": modes, "current": current},
             "display": self.display.summary(),
             "moonlight_pins": self.pin_hosts(),
+            "pc_remote": self.pc_remote_public(),
             "moonlight_default": (self.default_host() or {}).get("uuid"),
         }
 
@@ -203,7 +208,7 @@ class Shell:
         hosts = list(self.moon_hosts)
 
         def work():
-            status = {h["uuid"]: moonlight.server_status(h) for h in hosts}
+            status = {h["uuid"]: pcremote.check(h) for h in hosts}
             on_main(self._set_moon_status, status)
         thread(work, name="moonlight-status")
         self.push(moonlight=moonlight.describe(self.moon_hosts, self.moon_status))
@@ -212,6 +217,52 @@ class Shell:
     def _set_moon_status(self, status):
         self.moon_status = status
         self.push(moonlight=moonlight.describe(self.moon_hosts, self.moon_status))
+        # Sunshine à moitié planté deux fois de suite, sans stream en cours : relance discrète.
+        for h in self.moon_hosts:
+            st = status.get(h["uuid"]) or {}
+            half = st.get("sunshine") == "half" and not st.get("busy")
+            self._half_seen[h["uuid"]] = self._half_seen.get(h["uuid"], 0) + 1 if half else 0
+            if (half and self._half_seen[h["uuid"]] >= 2 and self.settings["sunshine_auto_repair"]
+                    and not self.apps.running("moonlight") and not self.waking
+                    and h["uuid"] not in self._repairing and pcremote.credentials(h["uuid"])):
+                self._repair_sunshine(h, st, quiet=True)
+
+    def _repair_sunshine(self, host, st, quiet=False, then=None):
+        """Relance Sunshine par son API (identifiant enregistré). then(résultat) dans la boucle principale."""
+        uuid = host["uuid"]
+        creds = pcremote.credentials(uuid)
+        if not creds or uuid in self._repairing:
+            if then:
+                then("auth" if not creds else "busy")
+            return
+        self._repairing.add(uuid)
+        log.info("Sunshine de %s : port appairé muet, relance par son API", host["name"])
+
+        def work():
+            res = pcremote.restart_sunshine(st, creds)
+            on_main(done, res)
+
+        def done(res):
+            self._repairing.discard(uuid)
+            self._half_seen[uuid] = 0
+            log.info("relance de Sunshine (%s) : %s", host["name"], res)
+            if quiet:
+                if res == "ok":
+                    self.toast("Sunshine relancé", sub=f"Il ne répondait plus correctement sur {host['name']}", icon="check")
+                else:
+                    self.toast(*self._repair_message(host, res), icon="warning", ms=8000)
+            self.poll_moonlight(force=True)
+            if then:
+                then(res)
+        thread(work, name="sunshine-repair")
+
+    @staticmethod
+    def _repair_message(host, res):
+        return {
+            "auth": ("Identifiant Sunshine refusé", "Vérifie-le dans Réglages › Moonlight"),
+            "unreachable": ("Sunshine injoignable", f"{host['name']} ne répond plus du tout"),
+            "stuck": ("Sunshine ne redémarre pas", f"Redémarre {host['name']} (menu du PC sur l'étagère Moonlight)"),
+        }.get(res, ("Sunshine ne répond pas", ""))
 
     def select_audio(self, delay=0):
         if self._audio_busy:
@@ -236,6 +287,8 @@ class Shell:
             self.home.surface.emit("shown")
         elif focus == "app":
             self.home.surface.emit("hidden")      # met en pause le fond animé de l'accueil
+        elif focus == "panel":
+            self.home.surface.emit("covered")     # menu ou clavier par-dessus : pas de mode ambiance
 
     def update_exclusive(self):
         """Manette réservée à la console (lecture exclusive) quand son interface est devant (accueil ou
@@ -338,6 +391,10 @@ class Shell:
                 self.close_panel()
             return
         if self.focus == "home":
+            if self.ambient:                  # le bouton Xbox réveille d'abord l'interface
+                self.ambient = False              # (même si l'accueil ne confirme pas, l'appui suivant marche)
+                self.home.surface.emit("wake-ui")
+                return
             if long:
                 self.home.surface.emit("power-menu")
             elif self.apps.last_app and self.apps.running(self.apps.last_app):
@@ -458,6 +515,7 @@ class Shell:
             "tabs": self.brave.tabs() if app and app.kind == "brave" else [],
             "volume": self.volume or {},
             "pads": list(self.pads.values()),
+            "batteries": [{"name": g["name"], "battery": g["battery"]} for g in self.bt.gamepads() if g["connected"]],
             "standby_mode": self.settings["standby_mode"],
         }
         self.open_panel("menu", data)
@@ -560,6 +618,11 @@ class Shell:
         want = self.settings["moonlight_host"]
         return next((h for h in hosts if h["uuid"] == want), hosts[0] if hosts else None)
 
+    def pc_remote_public(self):
+        """Ce que l'interface doit savoir du PC distant (aucun secret)."""
+        return {"relay": self.settings["wake_relay"], "ssh": self.settings["pc_ssh"],
+                "auth": [h["uuid"] for h in (self.moon_hosts or []) if pcremote.credentials(h["uuid"])]}
+
     def pin_hosts(self):
         return [k.split(":", 1)[1] for k in secret_keys() if k.startswith("moonlight_pin:")]
 
@@ -615,13 +678,15 @@ class Shell:
                              splash=dict(splash, sub=pc))
 
         def check():
-            st = moonlight.server_status(host) if host else {"online": True}
+            st = pcremote.check(host) if host else {"online": True}
             on_main(after_check, st)
 
         def after_check(st):
             if self.waking is not token or token["cancel"]:
                 return
-            if st.get("online"):
+            if st.get("online") and st.get("sunshine") == "half":
+                self._repair_before_stream(host, st, token, start)
+            elif st.get("online"):
                 start(False)
             elif host and host.get("mac"):
                 self._wake_and_wait(host, token, start)
@@ -630,20 +695,47 @@ class Shell:
         thread(check, name="moonlight-check")
         return True
 
+    def _repair_before_stream(self, host, st, token, start):
+        """Sunshine répond à moitié (Moonlight dirait « injoignable ») : on le relance d'abord."""
+        if not pcremote.credentials(host["uuid"]):
+            if self.waking is token:
+                self.waking = None
+            self.splash_hide()
+            self.toast("Sunshine est bloqué sur le PC", icon="warning", ms=9000,
+                       sub="Enregistre ton identifiant Sunshine (Réglages › Moonlight) : la console le relancera seule")
+            return
+        self.splash_update({"sub": "Sunshine ne répond plus correctement : redémarrage…"})
+
+        def done(res):
+            if self.waking is not token or token["cancel"]:
+                return
+            if res == "ok":
+                self.toast("Sunshine relancé", icon="check")
+                start(False)
+                return
+            self.waking = None
+            self.splash_hide()
+            self.toast(*self._repair_message(host, res), icon="warning", ms=9000)
+        self._repair_sunshine(host, st, then=done)
+
     def _wake_and_wait(self, host, token, start):
         """Réveille le PC (Wake-on-LAN) et attend qu'il réponde, avec un écran d'attente."""
         log.info("réveil de %s (Wake-on-LAN)", host["name"])
-        moonlight.wake(host)
+        self.wake_pc(host)
         self.splash_update({"sub": f"Réveil de {host['name']}…"})
 
         def poll():
             last = time.monotonic()
             while not token["cancel"] and time.monotonic() - token["start"] < 150:
-                if moonlight.server_status(host).get("online"):
-                    on_main(start, True)
+                st = pcremote.check(host)
+                if st.get("online"):
+                    if st.get("sunshine") == "half":
+                        on_main(self._repair_before_stream, host, st, token, lambda _woke: start(True))
+                    else:
+                        on_main(start, True)
                     return
                 if time.monotonic() - last > 10:
-                    moonlight.wake(host)
+                    self.wake_pc(host, in_thread=False)
                     last = time.monotonic()
                 elapsed = int(time.monotonic() - token["start"])
                 on_main(self.splash_update, {"sub": f"Réveil de {host['name']}… {elapsed} s — Ⓑ pour annuler"})
@@ -651,6 +743,16 @@ class Shell:
             if not token["cancel"]:
                 on_main(self._wake_failed, host, token)
         thread(poll, name="moonlight-wake")
+
+    def wake_pc(self, host, in_thread=True):
+        """Wake-on-LAN local + par le relais du réseau du PC s'il est configuré (Raspberry…)."""
+        moonlight.wake(host)
+        relay = self.settings["wake_relay"]
+        if relay and host.get("mac"):
+            if in_thread:
+                thread(pcremote.relay_wake, relay, host["mac"], name="wake-relay")
+            else:
+                pcremote.relay_wake(relay, host["mac"])
 
     def _wake_failed(self, host, token):
         if self.waking is token:
@@ -807,6 +909,31 @@ class Shell:
             if data.get("state") == "paired":
                 self.toast("Manette associée", sub=data.get("name"), icon="gamepad")
         self.push(bt=self.bt_state())
+        self._check_pad_batteries()
+
+    def _check_pad_batteries(self):
+        """Batterie faible : prévenir à 20, 10 puis 5 % (une fois chacun ; oublié après une recharge)."""
+        for g in self.bt.gamepads():
+            pct = g.get("battery")
+            if not g.get("connected") or not isinstance(pct, (int, float)):
+                continue
+            if pct >= 30:
+                self._battery_warned.pop(g["path"], None)
+                continue
+            level = battery_alert(pct, self._battery_warned.get(g["path"]))
+            if level:
+                self._battery_warned[g["path"]] = level
+                self.toast("Manette : batterie faible", icon="battery", ms=7000,
+                           sub=f"{g['name']} · {int(pct)} %" + (" — à recharger vite" if level <= 5 else ""))
+                self.pad.rumble(0.5, 260)
+
+    def pads_off(self):
+        """Éteint les manettes (comme sur une console) ; la veille suit si le réglage le prévoit."""
+        n = sum(1 for g in self.bt.gamepads() if g["connected"])
+        self.bt.disconnect_gamepads()
+        if n:
+            self.toast("Manette éteinte" if n == 1 else "Manettes éteintes", icon="gamepad",
+                       sub="Appuie sur son bouton Xbox pour la rallumer")
 
     def on_setting(self, key, value):
         if key == "guide_hold_ms":
@@ -854,6 +981,110 @@ class Shell:
         set_secret(f"moonlight_pin:{uuid}", pin or None)
         self.push(moonlight_pins=self.pin_hosts())
         return {"ok": True, "set": bool(pin)}
+
+    def ui_sunshine_auth(self, args, src):
+        """Enregistre l'identifiant de la page web de Sunshine (vérifié si le PC répond)."""
+        uuid, user, password = args.get("uuid"), (args.get("user") or "").strip(), args.get("password") or ""
+        host = next((h for h in (self.moon_hosts or moonlight.load_hosts()) if h["uuid"] == uuid), None)
+        if not host:
+            raise ValueError("PC inconnu")
+
+        def go(reply):
+            def work():
+                if not user:
+                    pcremote.save_credentials(uuid, None, None)
+                    result = {"ok": True, "cleared": True}
+                else:
+                    st = pcremote.check(host)
+                    res = (pcremote.verify_credentials(st, {"user": user, "password": password})
+                           if st.get("online") else "offline")
+                    if res != "auth":
+                        pcremote.save_credentials(uuid, user, password)
+                    result = {"ok": res != "auth", "result": res}
+                on_main(finish, result)
+
+            def finish(result):
+                self.push(pc_remote=self.pc_remote_public())
+                reply(result)
+            thread(work, name="sunshine-auth")
+        return go
+
+    def ui_pc_action(self, args, src):
+        """Actions du menu « PC » : wake | restart-sunshine | sleep | reboot | shutdown."""
+        uuid, action = args.get("uuid"), args.get("action")
+        host = next((h for h in (self.moon_hosts or moonlight.load_hosts()) if h["uuid"] == uuid), None)
+        if not host:
+            raise ValueError("PC inconnu")
+        name = host["name"]
+
+        def go(reply):
+            if action == "wake":
+                self.wake_pc(host)
+                self.toast(f"Réveil de {name} demandé", sub="via le relais" if self.settings["wake_relay"] else None, icon="power")
+                later(8000, self.poll_moonlight, True)
+                reply({"ok": True})
+            elif action == "restart-sunshine":
+                st = (self.moon_status or {}).get(uuid) or {}
+                if not st.get("online"):
+                    reply({"ok": False, "error": f"{name} ne répond pas"})
+                    return
+                self.toast("Redémarrage de Sunshine…", icon="restart")
+
+                def done(res):
+                    if res == "ok":
+                        self.toast("Sunshine relancé", icon="check")
+                    else:
+                        self.toast(*self._repair_message(host, res), icon="warning", ms=8000)
+                    reply({"ok": res == "ok", "result": res})
+                self._repair_sunshine(host, st, then=done)
+            elif action in pcremote.PC_COMMANDS:
+                target = self.settings["pc_ssh"]
+                if not target:
+                    reply({"ok": False, "error": "SSH du PC non configuré"})
+                    return
+                label = {"sleep": "Mise en veille", "reboot": "Redémarrage", "shutdown": "Arrêt"}[action]
+
+                def work():
+                    ok, err = pcremote.pc_power(target, action)
+                    on_main(done, ok, err)
+
+                def done(ok, err):
+                    if ok:
+                        self.toast(f"{label} de {name} demandé", icon="power")
+                        later(10000, self.poll_moonlight, True)
+                    else:
+                        self.toast(f"{label} impossible", sub=err[:80] or "SSH refusé", icon="warning", ms=8000)
+                    reply({"ok": ok, "error": err})
+                thread(work, name=f"pc-{action}")
+            else:
+                reply({"ok": False, "error": "action inconnue"})
+        return go
+
+    def ui_health(self, args, src):
+        """Réglages › Santé. full=True : aussi l'état SMART du SSD (plus lent, droits root en lecture)."""
+        full = bool(args.get("full"))
+        hosts, status = list(self.moon_hosts or []), dict(self.moon_status or {})
+        pads = [{"name": g["name"], "battery": g["battery"]} for g in self.bt.gamepads() if g["connected"]]
+
+        def go(reply):
+            def work():
+                data = health.collect(full=full)
+                pcs = []
+                for h in hosts:
+                    st = status.get(h["uuid"]) or {}
+                    pcs.append({"name": h["name"], "online": st.get("online"), "sunshine": st.get("sunshine"),
+                                "latency": health.latency(st.get("address"), st.get("port")) if st.get("online") else None})
+                data.update(pcs=pcs, pads=pads)
+                data["warnings"] = health.warnings(data, pcs, pads)
+                on_main(reply, data)
+            thread(work, name="health")
+        return go
+
+    def ui_ambient(self, args, src):
+        self.ambient = bool(args.get("on"))
+
+    def ui_pads_off(self, args, src):
+        self.pads_off()
 
     def ui_game_launch(self, args, src):
         return self.launch_game(args["system"], args["path"], args.get("name") or "")
@@ -1003,6 +1234,9 @@ class Shell:
         elif action == "standby":
             self.close_panel()
             later(300, self.power.standby, "menu")
+        elif action == "pads-off":
+            self.close_panel()
+            later(300, self.pads_off)
         elif action == "screenshot":
             self.close_panel()
             later(450, self.screenshot)
@@ -1127,6 +1361,12 @@ class Shell:
                 w.view.reload()
         elif cmd == "state":
             return self.snapshot()
+        elif cmd == "pc-config" and len(args) >= 1:
+            key = {"relay": "wake_relay", "relais": "wake_relay", "ssh": "pc_ssh", "pc": "pc_ssh"}.get(args[0])
+            if not key:
+                raise ValueError("pc-config relay|ssh VALEUR")
+            self.settings.set(key, args[1] if len(args) > 1 else "")
+            self.push(pc_remote=self.pc_remote_public())
         elif cmd == "launch" and args:
             return {"ok": bool(self.launch_tile(args[0]))}
         elif cmd == "run" and args:

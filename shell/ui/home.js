@@ -134,7 +134,9 @@ function captionFor(t) {
     if (!hosts.length) return ['Moonlight', pre + 'Joue aux jeux de ton PC sur la TV — associe ton PC pour commencer'];
     const def = hosts.find(h => h.uuid === A.st.moonlight_default) || hosts[0];
     const target = (A.st.settings || {}).moonlight_tile_app || 'gui';
-    const state = def.busy && def.current ? `en jeu : ${esc(def.current)}` : def.online ? 'en ligne' : def.online === false ? (def.wol ? 'en veille, réveil automatique' : 'hors ligne') : '…';
+    const auth = ((A.st.pc_remote || {}).auth || []).includes(def.uuid);
+    const state = def.online && def.sunshine === 'half' ? (auth ? 'Sunshine bloqué, relancé au lancement' : 'Sunshine bloqué')
+      : def.busy && def.current ? `en jeu : ${esc(def.current)}` : def.online ? 'en ligne' : def.online === false ? (def.wol ? 'en veille, réveil automatique' : 'hors ligne') : '…';
     const what = target === 'gui' ? 'ouvre Moonlight' : `lance <b>${esc(target)}</b> sur ${esc(def.name)}`;
     return ['Moonlight', pre + `${glyph('a')} ${what} · ${state}`];
   }
@@ -174,10 +176,12 @@ function shelfFor(t) {
     }
     hosts.forEach((hst, hi) => {
       if (hi) items.push({ sep: true });
-      const state = hst.busy ? 'busy' : hst.online ? 'on' : '';
-      const line = hst.busy ? `En jeu${hst.current ? ' : ' + esc(hst.current) : ''}` : hst.online ? 'En ligne' : hst.online === false ? (hst.wol ? 'En veille — réveil automatique' : 'Hors ligne') : 'Recherche…';
-      items.push({ html: `<div class="card wide">${icon('stream')}<div><h3>${esc(hst.name)}</h3><p><span class="status-dot ${state}"></span>&nbsp; ${line}<br>${(A.st.moonlight_pins || []).includes(hst.uuid) ? '🔒 code PIN Windows enregistré' : 'Réglages › Moonlight : code PIN Windows'}</p></div></div>`,
-        act: () => openSettings('moonlight') });
+      const half = hst.online && hst.sunshine === 'half';
+      const state = half ? 'busy' : hst.busy ? 'busy' : hst.online ? 'on' : '';
+      const line = half ? 'Sunshine bloqué' : hst.busy ? `En jeu${hst.current ? ' : ' + esc(hst.current) : ''}` : hst.online ? 'En ligne' : hst.online === false ? (hst.wol ? 'En veille' : 'Hors ligne') : 'Recherche…';
+      const hint = half ? 'Ⓐ pour le relancer' : hst.online === false ? 'Ⓐ pour le réveiller' : 'Ⓐ pour gérer le PC';
+      items.push({ html: `<div class="card wide">${icon('stream')}<div><h3>${esc(hst.name)}</h3><p><span class="status-dot ${state}"></span>&nbsp; ${line}<br>${hint}</p></div></div>`,
+        act: () => pcMenu(hst) });
       (hst.apps || []).forEach(app => {
         const ph = `<div class="ph" style="background:linear-gradient(160deg, ${hashColor(app.name)}, #111827)">${esc(initials(app.name))}</div>`;
         items.push({ html: `<div class="card poster">${app.boxart ? `<img src="${esc(fileUrl(app.boxart))}" alt="">` : ph}<div class="cap">${esc(app.name)}<small>${esc(hst.name)}</small></div></div>`,
@@ -367,6 +371,30 @@ function launch(id) {
   const running = (A.st.apps.running || []).some(a => a.id === id);
   Shell.call(running ? 'resume' : 'launch', running ? { app: id } : { id }).catch(e => notice('Erreur', e.message));
 }
+/* ------------------------------------------------------------ PC distant --- */
+function pcMenu(h) {
+  const pr = A.st.pc_remote || {}, auth = (pr.auth || []).includes(h.uuid), half = h.online && h.sunshine === 'half';
+  const act = (action, label) => () => Shell.call('pc-action', { uuid: h.uuid, action }).then(r => {
+    if (r && r.ok === false && r.error) notice(label, r.error);
+  });
+  const state = half ? 'Sunshine ne répond plus correctement (Moonlight le dirait « injoignable »).'
+    : h.busy ? `En jeu${h.current ? ' : ' + h.current : ''}.` : h.online ? 'En ligne, Sunshine répond.' : h.online === false ? 'Ne répond pas : en veille ou éteint.' : 'Recherche…';
+  const items = [];
+  if (!h.online) items.push({ icon: 'power', label: 'Réveiller le PC', sub: pr.relay ? `Wake-on-LAN + relais ${pr.relay}` : 'Wake-on-LAN', action: act('wake', 'Réveil') });
+  if (h.online) items.push(auth ? { icon: 'restart', label: 'Relancer Sunshine', sub: half ? 'Recommandé : il est bloqué' : 'Si le stream refuse de démarrer', action: act('restart-sunshine', 'Sunshine') }
+    : { icon: 'lock', label: 'Relancer Sunshine…', sub: 'Enregistre d\'abord ton identifiant Sunshine', action: () => openSettings('moonlight') });
+  if (pr.ssh && h.online) {
+    items.push({ icon: 'moon', label: 'Mettre le PC en veille', action: act('sleep', 'Veille') });
+    items.push({ icon: 'restart', label: 'Redémarrer le PC', action: () => confirm(`Redémarrer ${h.name} ?`, 'Les jeux et applications ouverts sur le PC seront fermés.', 'Redémarrer', act('reboot', 'Redémarrage'), true) });
+    items.push({ icon: 'power', label: 'Éteindre le PC', danger: true, action: () => confirm(`Éteindre ${h.name} ?`, 'Pour le rallumer à distance, le Wake-on-LAN devra fonctionner depuis l\'arrêt complet.', 'Éteindre', act('shutdown', 'Arrêt'), true) });
+  } else if (!pr.ssh) {
+    items.push({ icon: 'info', label: 'Veille et redémarrage à distance', sub: 'À activer : voir Réglages › Moonlight', action: () => openSettings('moonlight') });
+  }
+  items.push({ icon: 'settings', label: 'Ouvrir Moonlight', action: () => Shell.send('moonlight-open') });
+  items.push({ icon: 'back', label: 'Retour' });
+  menu({ title: h.name, text: esc(state), items });
+}
+
 function stream(host, app) { Sound.launch(); Shell.send('moonlight-stream', { uuid: host.uuid, app: app.name }); }
 function playGame(g) {
   Sound.launch();
@@ -388,15 +416,17 @@ function moveButton(b) {
 
 /* ------------------------------------------------------------- Calques ------ */
 class Layer {
-  constructor(html, cls = '') {
+  constructor(html, cls = '', opts = {}) {
     this.el = h(`<div class="layer ${cls}">${html}</div>`);
+    this.keepBg = !!opts.keepBg;
     $('#layers').appendChild(this.el);
     A.layers.push(this);
-    document.body.classList.add('layers-open');      // fond animé en pause derrière le voile
+    // Fond animé en pause derrière les voiles plein écran (pas pour le choix du thème, qui le montre).
+    document.body.classList.toggle('layers-open', A.layers.some(l => !l.keepBg));
   }
   close() {
     const i = A.layers.indexOf(this); if (i >= 0) A.layers.splice(i, 1);
-    document.body.classList.toggle('layers-open', A.layers.length > 0);
+    document.body.classList.toggle('layers-open', A.layers.some(l => !l.keepBg));
     this.el.remove(); renderHints();
     this.onClose && this.onClose();
   }
@@ -441,6 +471,7 @@ function powerMenu() {
     text: deep ? 'La veille coupe tout ; appuie sur le bouton Xbox de la manette pour rallumer.' : 'Veille légère : écran coupé, réveil instantané avec la manette.',
     items: [
       { icon: 'moon', label: 'Mettre en veille', action: () => Shell.send('power', { action: 'standby' }) },
+      ...(((A.st.bt || {}).gamepads || []).some(g => g.connected) ? [{ icon: 'gamepad', label: 'Éteindre la manette', sub: 'La console se met en veille 2 min après', action: () => Shell.send('pads-off') }] : []),
       { icon: 'restart', label: 'Redémarrer', action: () => confirm('Redémarrer ?', 'La console redémarre en une minute environ.', 'Redémarrer', () => Shell.send('power', { action: 'reboot' })) },
       { icon: 'power', label: 'Éteindre', danger: true, action: () => confirm('Éteindre complètement ?', 'Pour la rallumer, il faudra ouvrir le capot et appuyer sur le bouton d\'alimentation. Préfère la veille.', 'Éteindre', () => Shell.send('power', { action: 'poweroff' }), true) },
       { icon: 'back', label: 'Annuler' },
@@ -499,10 +530,12 @@ const SECTIONS = [
   { id: 'pads', icon: 'gamepad', label: 'Manettes' },
   { id: 'net', icon: 'wifi', label: 'Réseau' },
   { id: 'moonlight', icon: 'stream', label: 'Moonlight' },
+  { id: 'look', icon: 'palette', label: 'Apparence' },
   { id: 'display', icon: 'display', label: 'Image et son' },
   { id: 'sleep', icon: 'moon', label: 'Veille' },
   { id: 'browser', icon: 'keyboard', label: 'Navigateur et clavier' },
   { id: 'system', icon: 'chip', label: 'Système' },
+  { id: 'health', icon: 'pulse', label: 'Santé' },
 ];
 function choiceRow(icon_, title, sub, key, options) {
   const cur = (A.st.settings || {})[key];
@@ -531,8 +564,21 @@ class SettingsLayer extends Layer {
     A.settings = this;
     this.render();
     if (SECTIONS[this.sec].id === 'net') this.scanWifi();
+    if (SECTIONS[this.sec].id === 'health') this.loadHealth(true);
   }
-  close() { super.close(); A.settings = null; }
+  close() { clearTimeout(this.healthTimer); super.close(); A.settings = null; }
+  loadHealth(full) {
+    clearTimeout(this.healthTimer);
+    if (full) this.healthFull = Date.now();
+    Shell.call('health', { full }).then(d => {
+      if (!A.settings || SECTIONS[this.sec].id !== 'health') return;
+      // Les infos SMART (lentes) ne sont relues qu'une fois par minute : on garde les dernières.
+      if (!full && this.health) Object.assign(d, { ssd: this.health.ssd, io_errors: this.health.io_errors, privileged: this.health.privileged });
+      this.health = d; this.render();
+      const again = Date.now() - (this.healthFull || 0) > 60000;
+      this.healthTimer = setTimeout(() => this.loadHealth(again), 5000);
+    });
+  }
   rows() {
     const st = A.st, s = st.settings || {}, id = SECTIONS[this.sec].id;
     const out = [];
@@ -582,6 +628,21 @@ class SettingsLayer extends Layer {
       out.push(choiceRow('sparkle', 'Saisie automatique du code', s.moonlight_pin_mode === 'always' ? 'À chaque connexion (même si le PC était déjà allumé)' : s.moonlight_pin_mode === 'off' ? 'Jamais : bouton Xbox maintenu › « Saisir mon code PIN »' : 'Quand la console vient de réveiller le PC',
         'moonlight_pin_mode', [['wake', 'Après réveil du PC'], ['always', 'À chaque connexion'], ['off', 'Jamais (manuel)']]));
       out.push({ static: true, icon: 'info', title: 'Comment ça marche', sub: 'Dès que l\'image du PC arrive, la console tape le code (comme un copier-coller, quelle que soit la langue du clavier du PC).' });
+      const pr = st.pc_remote || {}, hasAuth = (pr.auth || []).includes(def.uuid);
+      out.push({ group: `${def.name} à distance` });
+      out.push({ icon: 'lock', title: 'Identifiant Sunshine', sub: hasAuth ? 'Enregistré : la console peut relancer Sunshine' : 'Celui de la page web de Sunshine : la console pourra le relancer s\'il se bloque',
+        value: hasAuth ? '✓' : 'non défini', act: () => this.editSunshine(def, hasAuth) });
+      out.push(toggleRow('sparkle', 'Réparer Sunshine automatiquement', 'S\'il ne répond plus qu\'à moitié (Moonlight le dirait « injoignable »)', 'sunshine_auto_repair'));
+      out.push({ static: true, icon: 'power', title: 'Relais de réveil', sub: pr.relay ? `${pr.relay} envoie le Wake-on-LAN depuis le réseau du PC` : 'Non configuré : console-pc-setup relais utilisateur@appareil (en SSH)' });
+      out.push({ static: true, icon: 'moon', title: 'Veille et redémarrage du PC', sub: pr.ssh ? `Par SSH (${pr.ssh})` : 'Non configuré : serveur OpenSSH sur le PC, puis console-pc-setup pc utilisateur@PC' });
+    } else if (id === 'look') {
+      const th = THEMES.find(x => x.id === s.theme) || THEMES[0];
+      out.push({ group: 'Accueil' });
+      out.push({ icon: 'palette', title: 'Thème', sub: th.sub, value: `<span class="choice">${esc(th.label)}</span>`, act: () => { this.close(); openThemes(() => openSettings('look')); } });
+      out.push(choiceRow('sparkle', 'Animation du fond', s.bg_motion === 'off' ? 'Fond immobile : le plus économe' : s.bg_motion === 'calm' ? 'Mouvement très lent, sans particules' : 'Aurores et particules en mouvement',
+        'bg_motion', [['full', 'Normale'], ['calm', 'Calme'], ['off', 'Immobile']]));
+      out.push(choiceRow('moon', 'Mode ambiance', 'Sans activité sur l\'accueil : l\'interface s\'efface, il ne reste que le fond et l\'heure (protège les TV OLED)',
+        'ambient_min', [[0, 'Jamais'], [2, '2 min'], [5, '5 min'], [10, '10 min']]));
     } else if (id === 'display') {
       const d = st.display;
       out.push({ group: 'Téléviseur' });
@@ -632,6 +693,8 @@ class SettingsLayer extends Layer {
       out.push({ group: 'Maintenance' });
       out.push({ icon: 'restart', title: 'Redémarrer l\'interface', sub: 'Les applications ouvertes restent ouvertes', act: () => Shell.send('power', { action: 'restart-ui' }) });
       out.push({ icon: 'power', title: 'Redémarrer la console', act: () => confirm('Redémarrer ?', '', 'Redémarrer', () => Shell.send('power', { action: 'reboot' })) });
+    } else if (id === 'health') {
+      healthRows(this.health, out, () => this.loadHealth(true));
     }
     return out;
   }
@@ -660,6 +723,8 @@ class SettingsLayer extends Layer {
         this.sec = n; this.row = 0; Sound.move(); this.render();
         if (SECTIONS[n].id === 'net' && !this.wifi) this.scanWifi();
         if (SECTIONS[n].id === 'system' && !this.info) Shell.call('info').then(i => { this.info = i; this.render(); });
+        if (SECTIONS[n].id === 'health') this.loadHealth(!this.health || Date.now() - (this.healthFull || 0) > 60000);
+        else clearTimeout(this.healthTimer);
         if (SECTIONS[n].id === 'display' && this.volume == null) Shell.call('volume', { delta: 0 }).then(v => { this.volume = v && v.volume; this.render(); });
       } else if (b === 'right' || b === 'a') { if (this.focusables.length) { this.col = 1; Sound.move(); this.render(); } }
       else if (b === 'b' || b === 'back') { Sound.back(); this.close(); }
@@ -685,6 +750,24 @@ class SettingsLayer extends Layer {
       { icon: 'trash', label: 'Supprimer le code', danger: true, action: () => Shell.send('moonlight-pin', { uuid: host.uuid, pin: '' }) },
       { icon: 'back', label: 'Annuler' }] });
   }
+  editSunshine(host, has) {
+    const ask = () => keyboard({ title: `Sunshine de ${host.name} : identifiant`, field: { label: 'Identifiant' },
+      onCommit: (user) => {
+        if (!user.trim()) return;
+        setTimeout(() => keyboard({ title: `Sunshine de ${host.name} : mot de passe`, field: { type: 'password', label: 'Mot de passe' },
+          onCommit: (pw) => Shell.call('sunshine-auth', { uuid: host.uuid, user: user.trim(), password: pw }).then(r => {
+            if (!r || !r.ok) return notice('Identifiant refusé', 'Sunshine n\'accepte pas cet identifiant ou ce mot de passe.');
+            notice('Identifiant enregistré', r.result === 'offline'
+              ? 'Le PC ne répond pas : il sera vérifié à la prochaine connexion.'
+              : 'Vérifié auprès de Sunshine. La console pourra le relancer s\'il se bloque.');
+          }) }), 250);
+      } });
+    if (!has) return ask();
+    menu({ title: 'Identifiant Sunshine', items: [
+      { icon: 'edit', label: 'Modifier', action: ask },
+      { icon: 'trash', label: 'Supprimer', danger: true, action: () => Shell.send('sunshine-auth', { uuid: host.uuid, user: '' }) },
+      { icon: 'back', label: 'Annuler' }] });
+  }
   setVolume(v) {
     v = Math.max(0, Math.min(100, v)); this.volume = v; this.render();
     Shell.call('volume', { set: v }).then(r => { if (r && r.volume != null) { this.volume = r.volume; this.render(); } });
@@ -708,6 +791,160 @@ class SettingsLayer extends Layer {
     else go(null);
   }
 }
+/* ---------------------------------------------------------------- Thèmes --- */
+const THEMES = [
+  { id: 'aurora', label: 'Aurore', sub: 'Aurores violettes et bleues, poussière d\'étoiles', c: ['#7c5cff', '#2b6cff', '#19bed2'] },
+  { id: 'ocean', label: 'Océan', sub: 'Profondeurs turquoise, bulles qui remontent', c: ['#00aacd', '#195fd2', '#00e1aa'] },
+  { id: 'sunset', label: 'Crépuscule', sub: 'Orange, rose et violet, poussière dorée', c: ['#ff783c', '#ff468c', '#8c3cdc'] },
+  { id: 'forest', label: 'Forêt', sub: 'Émeraude et lucioles', c: ['#28c878', '#14785a', '#a0dc5a'] },
+  { id: 'cosmos', label: 'Cosmos', sub: 'Nébuleuses et champ d\'étoiles', c: ['#a03cff', '#ff3caa', '#285aff'] },
+  { id: 'ember', label: 'Braises', sub: 'Rouge et or, braises qui s\'envolent', c: ['#ff5a1e', '#c81e1e', '#ffa028'] },
+  { id: 'sakura', label: 'Sakura', sub: 'Rose poudré, pétales qui tombent', c: ['#ff8cbe', '#c86eff', '#ffc8dc'] },
+  { id: 'winter', label: 'Hiver', sub: 'Bleu glacier, neige', c: ['#96c8ff', '#5a8cff', '#c8f0ff'] },
+  { id: 'retro', label: 'Rétro 80', sub: 'Soleil rayé, horizon quadrillé', c: ['#ff3cc8', '#5028ff', '#ffd166'] },
+  { id: 'midnight', label: 'Minuit', sub: 'Sobre et sombre, presque immobile', c: ['#4658aa', '#283c82', '#0b1020'] },
+  { id: 'oled', label: 'Noir OLED', sub: 'Noir absolu, aucune animation', c: ['#000000', '#111111', '#2a2a2a'] },
+];
+// Les particules défilent d'une hauteur de motif (--p-size, propre à chaque thème) : on relance leur
+// animation au changement de thème pour que le moteur recalcule l'image clé avec la nouvelle taille.
+function setTheme(id) {
+  if (document.body.dataset.theme === id) return;
+  document.body.dataset.theme = id;
+  const d = $('#bg .dust');
+  if (d) { d.style.animation = 'none'; void d.offsetWidth; d.style.animation = ''; }
+}
+function applyLook() {
+  const s = A.st.settings || {};
+  if (!document.body.classList.contains('previewing')) setTheme(s.theme || 'aurora');
+  document.body.classList.toggle('motion-calm', s.bg_motion === 'calm');
+  document.body.classList.toggle('motion-off', s.bg_motion === 'off');
+}
+class ThemeLayer extends Layer {
+  constructor(back) {
+    super(`<div class="theme-picker"><h2>Thème de l'accueil</h2><p class="tp-sub"></p><div class="tp-view"><div class="tp-track"></div></div>
+      <div class="hints">${hints([['dpad', 'Essayer'], ['a', 'Choisir'], ['b', 'Annuler']])}</div></div>`, 'themes', { keepBg: true });
+    this.back = back;                                    // rouvre Réglages › Apparence après le choix
+    this.saved = (A.st.settings || {}).theme || 'aurora';
+    this.i = Math.max(0, THEMES.findIndex(x => x.id === this.saved));
+    $('.tp-track', this.el).innerHTML = THEMES.map(x => `<div class="tp-card"><i style="background:radial-gradient(70% 60% at 25% 20%, ${x.c[0]}, transparent 70%),
+      radial-gradient(60% 60% at 80% 35%, ${x.c[1]}, transparent 70%), radial-gradient(80% 60% at 50% 110%, ${x.c[2]}, transparent 70%), #05070d"></i><b>${esc(x.label)}</b></div>`).join('');
+    document.body.classList.add('previewing');
+    this.show();
+  }
+  show() {
+    const x = THEMES[this.i];
+    setTheme(x.id);                                      // aperçu en direct sur le vrai fond
+    $$('.tp-card', this.el).forEach((c, i) => c.classList.toggle('focus', i === this.i));
+    $('.tp-sub', this.el).textContent = x.sub;
+    const card = $$('.tp-card', this.el)[this.i], view = $('.tp-view', this.el);
+    $('.tp-track', this.el).style.transform = `translateX(${Math.min(0, view.clientWidth / 2 - card.offsetLeft - card.offsetWidth / 2)}px)`;
+  }
+  handle(b) {
+    if (b === 'left' || b === 'right') {
+      const n = this.i + (b === 'left' ? -1 : 1);
+      if (n < 0 || n >= THEMES.length) return Sound.bump();
+      this.i = n; this.show(); Sound.move();
+    } else if (b === 'a') {
+      Sound.select(); this.done(THEMES[this.i].id);
+    } else if (b === 'b' || b === 'back') {
+      Sound.back(); this.done(this.saved);
+    }
+  }
+  done(id) {
+    document.body.classList.remove('previewing');
+    setTheme(id);
+    if (id !== this.saved) setSetting('theme', id);
+    this.close();
+    if (this.back) this.back();
+  }
+}
+function openThemes(back) { if (!A.layers.some(l => l instanceof ThemeLayer)) new ThemeLayer(back); }
+
+// Mode ambiance : après quelques minutes sans rien toucher sur l'accueil, seuls le fond et l'heure restent.
+const Ambient = {
+  last: Date.now(), on: false, timer: null,
+  touch() { this.last = Date.now(); if (this.on) { this.exit(); return true; } return false; },
+  check() {
+    const min = (A.st.settings || {}).ambient_min || 0;
+    if (this.on || !min || A.layers.length || A.covered || document.hidden || document.body.classList.contains('bg-paused')) return;
+    if (Date.now() - this.last >= min * 60000) this.enter();
+  },
+  enter() {
+    this.on = true; this.tick(true);
+    document.body.classList.add('ambient');
+    Shell.send('ambient', { on: true });
+    this.timer = setInterval(() => this.tick(false), 30000);
+  },
+  exit() {
+    this.on = false; clearInterval(this.timer);
+    document.body.classList.remove('ambient');
+    Shell.send('ambient', { on: false });
+  },
+  tick(move) {
+    const now = new Date(), el = $('#ambient .amb-clock');
+    $('#ambient .t').textContent = clock(now);
+    $('#ambient .d').textContent = dateLine(now);
+    if (move || now.getSeconds() < 30) {                 // l'heure change de place chaque minute
+      const x = 8 + Math.random() * 62, y = 12 + Math.random() * 58;
+      el.style.transform = `translate(${x}vw, ${y}vh)`;
+    }
+  },
+};
+setInterval(() => Ambient.check(), 5000);
+
+/* ------------------------------------------------------------- Santé ----- */
+function healthRows(d, out, refresh) {
+  if (!d) { out.push({ icon: 'pulse', title: 'Analyse en cours…' }); return; }
+  // Lignes sélectionnables (sans action) : c'est ce qui permet de faire défiler la page à la manette.
+  const go = v => (v / 1e9).toFixed(v >= 100e9 ? 0 : 1) + ' Go';
+  const deg = v => (v == null ? '—' : `${Math.round(v)} °C`);
+  const tag = (txt, cls) => `<span class="hval ${cls || ''}">${esc(txt)}</span>`;
+  const warn = d.warnings || [];
+  out.push({ group: 'État général' });
+  if (!warn.length) out.push({ icon: 'check', title: 'Tout va bien', sub: 'Aucun problème détecté', value: tag('OK', 'ok') });
+  warn.forEach(w => out.push({ icon: 'warning', title: w.level === 'bad' ? 'Problème' : 'Attention', sub: w.text, value: tag(w.level === 'bad' ? '!' : '•', w.level) }));
+
+  const s = d.ssd || {};
+  out.push({ group: 'Disque (SSD)' });
+  if (d.privileged === false || !d.ssd) {
+    out.push({ icon: 'disk', title: s.model || 'SSD', sub: d.privileged === false ? 'Détails indisponibles : mets la console à jour (update.sh)' : 'Lecture de l\'état SMART…' });
+  } else {
+    out.push({ icon: 'disk', title: s.model || 'SSD', sub: s.power_on_hours != null ? `${s.power_on_hours} h d'utilisation · ${s.unsafe_shutdowns ?? '—'} coupures brusques` : '',
+      value: tag(s.passed === false || s.critical_warning ? 'Problème' : 'Sain', s.passed === false || s.critical_warning ? 'bad' : 'ok') });
+    out.push({ icon: 'pulse', title: 'Erreurs depuis le démarrage', sub: 'Décrochages ou erreurs de lecture/écriture vus par le système',
+      value: tag(String(d.io_errors ?? '—'), d.io_errors ? 'bad' : 'ok') });
+    if (s.percentage_used != null) out.push({ icon: 'chip', title: 'Usure', sub: `Réserve disponible : ${s.available_spare ?? '—'} %`,
+      value: tag(`${s.percentage_used} %`, s.percentage_used >= 90 ? 'warn' : 'ok') });
+  }
+  if (d.disk) out.push({ icon: 'folder', title: 'Espace libre', sub: `sur ${go(d.disk.total)}`, value: tag(go(d.disk.free), d.disk.free < 10e9 ? 'warn' : '') });
+  if (d.readonly) out.push({ icon: 'warning', title: 'Disque en lecture seule', sub: 'Redémarre la console', value: tag('!', 'bad') });
+
+  const t = d.temps || {};
+  out.push({ group: 'Températures' });
+  out.push({ icon: 'thermo', title: 'Processeur', value: tag(deg(t.cpu), (t.cpu || 0) >= 90 ? 'warn' : '') });
+  out.push({ icon: 'thermo', title: 'SSD', value: tag(deg(t.ssd ?? s.temperature), ((t.ssd ?? s.temperature) || 0) >= 70 ? 'warn' : '') });
+
+  const m = d.memory || {};
+  out.push({ group: 'Système' });
+  if (m.total) out.push({ icon: 'chip', title: 'Mémoire disponible', sub: `sur ${go(m.total)}`, value: tag(go(m.available || 0), (m.available || 0) < 300e6 ? 'warn' : '') });
+  const up = Math.floor((d.uptime || 0) / 60);
+  out.push({ icon: 'power', title: 'Allumée depuis', sub: `charge : ${d.load ?? '—'}`, value: tag(up >= 1440 ? `${Math.floor(up / 1440)} j ${Math.floor(up % 1440 / 60)} h` : `${Math.floor(up / 60)} h ${String(up % 60).padStart(2, '0')}`) });
+
+  out.push({ group: 'Réseau et PC distant' });
+  const ts = d.tailscale;
+  out.push({ icon: 'link', title: 'Tailscale', sub: ts == null ? 'Non installé' : ts.running ? `Connecté · ${ts.ip || ''}` : 'Déconnecté',
+    value: tag(ts == null ? '—' : ts.running ? 'OK' : 'Hors ligne', ts == null ? '' : ts.running ? 'ok' : 'warn') });
+  (d.pcs || []).forEach(pc => out.push({ icon: 'stream', title: pc.name,
+    sub: pc.online ? (pc.sunshine === 'half' ? 'Sunshine bloqué' : 'Sunshine répond') : 'Ne répond pas (en veille ou éteint)',
+    value: tag(pc.online ? (pc.latency != null ? `${pc.latency} ms` : 'en ligne') : 'hors ligne', pc.online ? (pc.sunshine === 'half' ? 'warn' : 'ok') : '') }));
+  if ((d.pads || []).length) {
+    out.push({ group: 'Manettes' });
+    d.pads.forEach(p => out.push({ icon: 'battery', title: p.name, value: tag(typeof p.battery === 'number' ? `${p.battery} %` : '—', p.battery <= 20 ? 'warn' : 'ok') }));
+  }
+  out.push({ group: ' ' });
+  out.push({ icon: 'restart', title: 'Actualiser', sub: 'Relit aussi l\'état SMART du disque', act: refresh });
+}
+
 function openSettings(section) { if (!A.settings) new SettingsLayer(section); }
 function signalBars(s) {
   const n = s >= 75 ? 4 : s >= 50 ? 3 : s >= 25 ? 2 : 1;
@@ -819,6 +1056,7 @@ function startWizard() { if (!A.layers.some(l => l instanceof Wizard)) A.wizard 
 
 /* --------------------------------------------------------------- Entrées --- */
 function handleButton(b) {
+  if (Ambient.touch()) return;                           // sortie du mode ambiance : rien d'autre
   const top = A.layers[A.layers.length - 1];
   if (top) { top.handle(b); renderHintsSoon(); return; }
   homeButton(b);
@@ -828,14 +1066,16 @@ function renderHintsSoon() { clearTimeout(A.hintT); A.hintT = setTimeout(renderH
 Shell.on('pad', ev => handleButton(ev.button));
 Shell.on('state', partial => {
   Object.assign(A.st, partial || {});
-  if (partial && partial.settings) Sound.enabled = partial.settings.ui_sounds !== false;
+  if (partial && partial.settings) { Sound.enabled = partial.settings.ui_sounds !== false; applyLook(); }
   if (partial && partial.pads && partial.pads.length) Pad.kind = partial.pads[0].kind === 'playstation' ? 'playstation' : 'xbox';
   scheduleRender(partial || {});
 });
 // Fond animé en pause quand l'accueil est caché (appli ou jeu au premier plan) : rien ne tourne pour rien.
 const pauseBg = paused => document.body.classList.toggle('bg-paused', paused);
-Shell.on('shown', () => { pauseBg(false); renderAll(); });
-Shell.on('hidden', () => { pauseBg(true); Sound.sleep(); });
+Shell.on('shown', () => { A.covered = false; Ambient.last = Date.now(); pauseBg(false); renderAll(); });
+Shell.on('covered', () => { A.covered = true; Ambient.touch(); });
+Shell.on('hidden', () => { pauseBg(true); Sound.sleep(); if (Ambient.on) Ambient.exit(); });
+Shell.on('wake-ui', () => Ambient.touch());
 document.addEventListener('visibilitychange', () => pauseBg(document.hidden));
 Shell.on('power-menu', () => powerMenu());
 Shell.on('pairing', ev => { A.layers.forEach(l => l instanceof PairingLayer && l.state(ev)); });
@@ -878,6 +1118,7 @@ function scheduleRender(partial) {
 }
 
 document.addEventListener('keydown', e => {
+  if (Ambient.touch()) { e.preventDefault(); return; }
   const top = A.layers[A.layers.length - 1];
   if (top && top.key && top.key(e)) { e.preventDefault(); return; }
   const b = keyToButton(e);
@@ -885,5 +1126,5 @@ document.addEventListener('keydown', e => {
 });
 setInterval(renderTop, 15000);
 
-Shell.call('state').then(st => { if (st) { Object.assign(A.st, st); Sound.enabled = (st.settings || {}).ui_sounds !== false; A.sig = {}; renderAll(); scheduleRender(st); } });
+Shell.call('state').then(st => { if (st) { Object.assign(A.st, st); Sound.enabled = (st.settings || {}).ui_sounds !== false; applyLook(); A.sig = {}; renderAll(); scheduleRender(st); } });
 renderAll();

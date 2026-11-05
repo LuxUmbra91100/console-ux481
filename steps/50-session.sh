@@ -2,6 +2,7 @@
 # 50 — Session console : connexion automatique (greetd) → sway en mode kiosque.
 source "$REPO_DIR/lib/common.sh"; step_init
 
+apt_install_available smartmontools
 apt_install_available sway swayidle xwayland greetd wtype wl-clipboard grim foot wlr-randr \
   xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk \
   power-profiles-daemon policykit-1 polkitd

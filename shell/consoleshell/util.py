@@ -136,3 +136,12 @@ def is_descendant(pid, ancestor, max_depth=40):
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+
+def battery_alert(pct, last_warned):
+    """Seuil de batterie faible à signaler (20, 10 puis 5 %), ou None. last_warned : dernier seuil
+    déjà signalé (None si aucun). Le seuil est oublié dès que la batterie remonte à 30 %."""
+    if not isinstance(pct, (int, float)) or pct >= 30:
+        return None
+    level = next((s for s in (5, 10, 20) if pct <= s), None)
+    return level if level is not None and level < (last_warned or 101) else None
