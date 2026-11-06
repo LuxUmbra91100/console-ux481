@@ -3,6 +3,7 @@ l'accueil), jaquettes téléchargées par ES-DE, lancement direct d'un jeu."""
 import os
 import re
 import time
+import unicodedata
 import xml.etree.ElementTree as ET
 
 from . import resume
@@ -101,6 +102,37 @@ def count_games(system):
     except OSError:
         return 0
     return n
+
+
+def _fold(text):
+    """Minuscules sans accents, pour comparer des noms de jeux."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
+
+
+def find_game(query):
+    """(système, chemin, nom) du premier jeu dont le nom contient tous les mots de query, ou None."""
+    words = _fold(query).split()
+    if not words:
+        return None
+    for system, *_ in SYSTEMS:
+        exts = _exts(system)
+        folders = [os.path.join(ROMS_DIR, system)]
+        while folders:
+            folder = folders.pop(0)
+            try:
+                entries = sorted(os.scandir(folder), key=lambda e: e.name.casefold())
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.name.startswith((".", "_")):
+                    continue
+                stem, ext = os.path.splitext(entry.name)
+                is_game = ext.lower() in exts and (entry.is_file() or dir_as_file(entry.path, exts))
+                if is_game and all(w in _fold(stem) for w in words):
+                    return system, entry.path, stem
+                if entry.is_dir() and not is_game and folder == os.path.join(ROMS_DIR, system):
+                    folders.append(entry.path)              # un niveau de sous-dossiers, comme ES-DE
+    return None
 
 
 def systems():

@@ -199,6 +199,24 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue(covers.media_path("wii", d, "covers").endswith(os.path.join("wii", "covers", "Xenoblade.m3u.png")))
         self.assertEqual(library.command("wii", d)[-1], os.path.join(d, "Xenoblade.m3u"))
 
+    def test_find_game(self):
+        """console-ctl jeu TEXTE : trouver un jeu par une partie de son nom, sans accents ni casse."""
+        n64 = os.path.join(TMP_HOME, "ROMs", "n64")
+        os.makedirs(os.path.join(n64, "Europe"), exist_ok=True)
+        sm64 = os.path.join(n64, "Super Mario 64 (Europe) (En,Fr,De).z64")
+        open(sm64, "w").close()
+        open(os.path.join(n64, "_LISEZMOI.txt"), "w").close()
+        rayman = os.path.join(n64, "Europe", "Rayman 2 - The Great Escape (Europe).z64")
+        open(rayman, "w").close()
+        self.assertEqual(library.find_game("mario 64"), ("n64", sm64, "Super Mario 64 (Europe) (En,Fr,De)"))
+        self.assertEqual(library.find_game("RAYMAN great")[1], rayman)          # un sous-dossier
+        xeno = os.path.join(TMP_HOME, "ROMs", "wii", "Xenoblade.m3u")              # dossier vu comme un jeu
+        os.makedirs(xeno, exist_ok=True)
+        open(os.path.join(xeno, "Xenoblade.m3u"), "w").close()
+        self.assertEqual(library.find_game("Xénoblade")[1], xeno)
+        self.assertIsNone(library.find_game("lisezmoi"))
+        self.assertIsNone(library.find_game("   "))
+
     def test_set_startup(self):
         library.set_startup("ps2")
         with open(library.SETTINGS_XML, encoding="utf-8") as f:

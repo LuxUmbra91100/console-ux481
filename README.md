@@ -429,6 +429,12 @@ journalctl --user -u console-shell -f
 /opt/console/bin/console-ctl notify "Bonjour"
 ```
 
+Lancer un jeu sans passer par ES-DE (comme depuis l'accueil), en donnant une partie de son nom :
+
+```bash
+console-ctl jeu mario 64
+```
+
 Au clavier sur la console : **Ctrl+Alt+Entrée** ouvre un terminal,
 **Ctrl+Alt+Échap** revient à l'accueil.
 
@@ -437,7 +443,7 @@ Au clavier sur la console : **Ctrl+Alt+Entrée** ouvre un terminal,
 | Couche | Rôle |
 |---|---|
 | greetd | connexion automatique, relance de la session si besoin |
-| sway (`/etc/console/sway.conf`) | compositeur Wayland en mode kiosque : une appli plein écran par espace de travail, sortie HDMI seule |
+| sway (`/etc/console/sway.conf`) | compositeur Wayland en mode kiosque : une appli plein écran par espace de travail, sortie HDMI seule. Il compose toujours l'image (`WLR_SCENE_DISABLE_DIRECT_SCANOUT=1`) : l'envoi direct d'un jeu plein écran à l'écran pouvait le figer sur un écran noir |
 | **console-shell** (`/opt/console`) | Python + GTK + WebKit : accueil (HTML/CSS/JS), menu rapide et clavier virtuel en surcouche (*layer-shell*), manettes via SDL2, souris/clavier virtuels (uinput), pilotage de Brave (DevTools), PC Moonlight, ES-DE, BlueZ, NetworkManager, veille (logind) |
 | Flatpak | Moonlight, RetroArch, Dolphin, PCSX2, Azahar |
 | ES-DE (`/opt/es-de`) | bibliothèque d'émulation |

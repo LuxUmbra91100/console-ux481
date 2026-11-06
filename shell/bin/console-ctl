@@ -2,7 +2,8 @@
 """console-ctl COMMANDE [ARGS…] — envoie une commande au shell de la console.
 
 Commandes : guide, guide-long, home, power-button, standby, wake, volume +5|-5|mute,
-            notify TEXTE, reload-ui, state
+            notify TEXTE, reload-ui, state,
+            jeu TEXTE (lance le premier jeu dont le nom contient TEXTE, sans passer par ES-DE)
 """
 import json
 import os

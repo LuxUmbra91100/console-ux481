@@ -6,6 +6,10 @@ export XDG_SESSION_DESKTOP=sway
 export MOZ_ENABLE_WAYLAND=1
 export LIBVA_DRIVER_NAME=iHD
 export SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0
+# sway compose toujours l'image au lieu de confier celle d'un jeu plein écran directement à l'écran
+# (« direct scanout ») : les jeux Wayland natifs (RetroArch…) pouvaient rester figés sur un écran
+# noir. Le coût est négligeable. Remettre 0 dans ~/.config/console/session.env pour revenir en arrière.
+export WLR_SCENE_DISABLE_DIRECT_SCANOUT=1
 export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
 export _JAVA_AWT_WM_NONREPARENTING=1
 export XCURSOR_THEME=Adwaita

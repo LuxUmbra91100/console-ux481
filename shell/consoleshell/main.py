@@ -931,6 +931,20 @@ class Shell:
                          splash={"title": name, "kind": "game", "art": cover, "sub": library.SYSTEM_INDEX[system][1]})
         return True
 
+    def ctl_game(self, query):
+        """console-ctl jeu TEXTE : lance le premier jeu dont le nom contient TEXTE, comme depuis
+        l'accueil (sans passer par ES-DE). Pratique pour essayer un jeu en SSH."""
+        found = library.find_game(query)
+        if not found:
+            return {"error": f"aucun jeu ne correspond à « {query} »"}
+        system, path, name = found
+        for other, label in (("games", "ES-DE"), ("game", "le jeu en cours")):
+            if self.apps.running(other):
+                return {"error": f"« {name} » trouvé : ferme d'abord {label} (bouton Xbox › Quitter), puis relance la commande"}
+        self.close_panel()
+        self.launch_game(system, path, name)
+        return {"ok": True, "jeu": name, "système": system}
+
     def launch_moonlight(self):
         if self.apps.running("moonlight"):
             self.resume("moonlight")
@@ -1733,6 +1747,8 @@ class Shell:
             self.push(pc_remote=self.pc_remote_public())
         elif cmd == "launch" and args:
             return {"ok": bool(self.launch_tile(args[0]))}
+        elif cmd == "jeu" and args:
+            return self.ctl_game(" ".join(args))
         elif cmd == "run" and args:
             # Dépannage : lance n'importe quelle commande comme une application de la console.
             self.apps.launch("debug", args[0], list(args), "debug")

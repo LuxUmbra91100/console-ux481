@@ -29,6 +29,26 @@ else
   echo "sway injoignable : lance cette commande avec l'utilisateur de la console, pendant que l'interface tourne"
 fi
 
+section "Sway"
+swaymsg -t get_version -r 2>/dev/null | jq -r '"version \(.human_readable)"'
+sp=$(pgrep -u "$uid" -x sway | head -n 1)
+if [[ -n $sp ]]; then
+  if tr '\0' '\n' < "/proc/$sp/environ" 2>/dev/null | grep -qx 'WLR_SCENE_DISABLE_DIRECT_SCANOUT=1'; then
+    echo "envoi direct des jeux à l'écran (direct scanout) : désactivé"
+  else
+    echo "envoi direct des jeux à l'écran (direct scanout) : actif (redémarre la console après la mise à jour)"
+  fi
+fi
+echo "Dernières erreurs de sway et du pilote graphique :"
+jl=$(journalctl --user -b -t sway -n 25 --no-pager -q 2>/dev/null)
+[[ -z $jl ]] && jl=$(journalctl -b -t sway -n 25 --no-pager -q 2>/dev/null)
+if [[ -n $jl ]]; then
+  sed 's/^/  /' <<< "$jl"
+else
+  echo "  (journal illisible avec cet utilisateur : sudo journalctl -b -t sway -n 25)"
+fi
+journalctl -k -b --no-pager -q 2>/dev/null | grep -iE 'i915|drm|gpu hang' | tail -n 8 | sed 's/^/  /'
+
 section "Fenêtres"
 swaymsg -t get_tree -r 2>/dev/null | jq -r '.. | objects | select((.pid? // 0) > 0) | "\(.app_id // .window_properties.class // "?")  [\(.shell // "?")]  cadre=\(.rect.width)x\(.rect.height)+\(.rect.x)+\(.rect.y)  contenu=\(.geometry.width)x\(.geometry.height)  fenêtre=\(.window_rect.width)x\(.window_rect.height)+\(.window_rect.x)+\(.window_rect.y)  plein-écran=\(.fullscreen_mode)  visible=\(.visible)  focus=\(.focused)"'
 
