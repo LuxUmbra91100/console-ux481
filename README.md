@@ -404,9 +404,10 @@ côté avec une ancienne version peut ne pas reprendre (PCSX2 repart alors du d�
 | Moonlight : « PC injoignable » alors que le PC est allumé | Sunshine est sûrement bloqué : voir *PC dans une autre maison* (section 6), ou relance-le depuis la carte du PC. |
 
 Un jeu ou une image qui se comporte bizarrement : lance le jeu, puis en SSH (avec l'utilisateur
-de la console) la commande ci-dessous. Elle rassemble les écrans, la taille réelle de chaque
-fenêtre, les réglages des émulateurs et leurs derniers journaux (chaque lancement d'émulateur
-est noté dans `~/.local/state/console/logs/emu-*.log`, même depuis ES-DE) :
+de la console) la commande ci-dessous. Elle rassemble la version installée (pour vérifier qu'une
+mise à jour est bien passée), les écrans, la taille réelle de chaque fenêtre, les réglages des
+émulateurs (dont le moteur d'affichage N64 réellement demandé) et leurs derniers journaux (chaque
+lancement d'émulateur est noté dans `~/.local/state/console/logs/emu-*.log`, même depuis ES-DE) :
 
 ```bash
 console-diag

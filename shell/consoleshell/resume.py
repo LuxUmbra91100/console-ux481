@@ -290,14 +290,38 @@ def _core_of(args):
     return None
 
 
-# Affichage N64 (Réglages › Jeux › Image) → pilote vidéo de RetroArch, RDP et RSP de Mupen64Plus-Next.
-# GLideN64 (OpenGL) reste noir sur cette machine ; ParaLLEl passe par Vulkan, qui marche (Dolphin
-# l'utilise) ; Angrylion dessine sur le processeur : le plus sûr, mais le plus lent.
+# Affichage N64 (Réglages › Jeux › Image) → RDP et RSP de Mupen64Plus-Next. GLideN64 (OpenGL) reste
+# noir sur cette machine ; ParaLLEl dessine en Vulkan (qui marche : Dolphin l'utilise) ; Angrylion
+# dessine sur le processeur : le plus sûr, mais le plus lent. Le pilote vidéo n'est pas imposé :
+# RetroArch prend de lui-même celui que demande le moteur (Vulkan pour ParaLLEl).
 N64_VIDEO = {
-    "parallel": ("vulkan", "parallel", "parallel"),
-    "gliden64": ("glcore", "gliden64", "hle"),
-    "angrylion": ("glcore", "angrylion", "parallel"),
+    "parallel": ("parallel", "parallel"),
+    "gliden64": ("gliden64", "hle"),
+    "angrylion": ("angrylion", "parallel"),
 }
+
+
+def ra_config_dir(cfg=None):
+    """Dossier des réglages propres aux cœurs et aux jeux, trouvé comme le fait RetroArch :
+    rgui_config_directory ; « config » à côté de retroarch.cfg s'il est absent ; le dossier de
+    retroarch.cfg s'il vaut « default »."""
+    cfg = cfg or RA_CFG
+    value = None
+    try:
+        with open(cfg, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r'\s*rgui_config_directory\s*=\s*"?([^"\r\n]*)', line)
+                if m:
+                    value = m.group(1).strip()
+    except OSError:
+        pass
+    if value is None:
+        return os.path.join(os.path.dirname(cfg), "config")
+    if value in ("", "default"):
+        return os.path.dirname(cfg)
+    if value == "~" or value.startswith("~/"):
+        value = HOME + value[1:]
+    return value if os.path.isabs(value) else os.path.join(os.path.dirname(cfg), "config")
 
 
 def deferred_core_setup(core, settings=None):
@@ -305,14 +329,18 @@ def deferred_core_setup(core, settings=None):
     la touche « charger » (envoyée par la console après le lancement) ; pour la N64, le moteur
     d'affichage choisi."""
     name = DEFERRED_CORES[core]
-    base = os.path.join(RA_DIR, "config", name)
-    cfg = {"savestate_auto_load": '"false"', "state_slot": '"-1"'}
+    base = os.path.join(ra_config_dir(), name)
+    override = os.path.join(base, name + ".cfg")
+    _cfg_lines(override, {"savestate_auto_load": '"false"', "state_slot": '"-1"'})
+    _cfg_drop(override, "video_driver")             # imposé par une version précédente : inutile
     if core == "mupen64plus_next":
-        driver, rdp, rsp = N64_VIDEO.get((settings or {}).get("n64_video"), N64_VIDEO["parallel"])
-        cfg["video_driver"] = f'"{driver}"'
-        _cfg_lines(os.path.join(base, name + ".opt"),
-                   {"mupen64plus-rdp-plugin": f'"{rdp}"', "mupen64plus-rsp-plugin": f'"{rsp}"'})
-    _cfg_lines(os.path.join(base, name + ".cfg"), cfg)
+        rdp, rsp = N64_VIDEO.get((settings or {}).get("n64_video"), N64_VIDEO["parallel"])
+        options = {"mupen64plus-rdp-plugin": f'"{rdp}"', "mupen64plus-rsp-plugin": f'"{rsp}"'}
+        # Options du cœur, plus celles propres à un jeu ou à un dossier : RetroArch les préfère quand
+        # elles existent (créées depuis son menu), le choix fait dans les réglages doit y être aussi.
+        paths = {os.path.join(base, name + ".opt")} | set(glob.glob(os.path.join(glob.escape(base), "*.opt")))
+        for path in sorted(paths):
+            _cfg_lines(path, options)
     return name
 
 
@@ -323,6 +351,18 @@ def _cfg_lines(path, values):
         atomic_write(path, "")
     for key, value in values.items():
         _cfg_line(path, key, value)
+
+
+def _cfg_drop(path, key):
+    """Retire « clé = … » d'un fichier de réglages RetroArch."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return
+    kept = [ln for ln in lines if not re.match(rf"\s*{re.escape(key)}\s*=", ln)]
+    if kept != lines:
+        atomic_write(path, "".join(ln + "\n" for ln in kept))
 
 
 def _cfg_line(path, key, value):

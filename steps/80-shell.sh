@@ -6,6 +6,11 @@ install -d "$PREFIX" "$PREFIX/bin" "$PREFIX/share/icons"
 rsync -a --delete "$SHELL_SRC/consoleshell/" "$PREFIX/consoleshell/"
 rsync -a --delete --exclude 'mock.js' "$SHELL_SRC/ui/" "$PREFIX/ui/"
 for f in "$SHELL_SRC"/bin/*; do install -m 0755 "$f" "$PREFIX/bin/"; done
+# Version installée (affichée par console-diag et en tête des journaux des émulateurs). git passe par
+# le propriétaire du dépôt : en root, il refuserait un dépôt qui ne lui appartient pas.
+ver=$(runuser -u "$(stat -c %U "$REPO_DIR")" -- git -C "$REPO_DIR" log -1 --format='%h du %cd' \
+  --date=format-local:'%d/%m/%Y %H:%M' 2>/dev/null || true)
+printf '%s\n' "${ver:-inconnue}" > "$PREFIX/VERSION"
 chown -R root:root "$PREFIX"
 chmod -R a+rX "$PREFIX"
 python3 -m compileall -q "$PREFIX/consoleshell" || true

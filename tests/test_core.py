@@ -775,15 +775,29 @@ class ResumeTests(unittest.TestCase):
         self.assertIn("--verbose", cmd)
         override = os.path.join(r.RA_DIR, "config", "Mupen64Plus-Next", "Mupen64Plus-Next.cfg")
         with open(override, encoding="utf-8") as f:
-            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\nvideo_driver = "vulkan"\n')
+            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\n')
         options = os.path.join(r.RA_DIR, "config", "Mupen64Plus-Next", "Mupen64Plus-Next.opt")
         with open(options, encoding="utf-8") as f:
             self.assertEqual(f.read(), 'mupen64plus-rdp-plugin = "parallel"\nmupen64plus-rsp-plugin = "parallel"\n')
-        r.deferred_core_setup("mupen64plus_next", {"n64_video": "gliden64"})       # réglage changé
+        # Pilote imposé par une version précédente : retiré (RetroArch prend celui que le moteur demande).
+        # Options propres à un jeu (créées depuis le menu de RetroArch, qui les préfère) : choix appliqué aussi.
+        with open(override, "a", encoding="utf-8") as f:
+            f.write('video_driver = "vulkan"\n')
+        game_opt = os.path.join(os.path.dirname(options), "Super Mario 64 (Europe) (En,Fr,De).opt")
+        with open(game_opt, "w", encoding="utf-8") as f:
+            f.write('mupen64plus-43screensize = "640x480"\nmupen64plus-rdp-plugin = "gliden64"\n')
+        r.deferred_core_setup("mupen64plus_next", {"n64_video": "angrylion"})      # réglage changé
+        with open(options, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'mupen64plus-rdp-plugin = "angrylion"\nmupen64plus-rsp-plugin = "parallel"\n')
+        with open(game_opt, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'mupen64plus-43screensize = "640x480"\nmupen64plus-rdp-plugin = "angrylion"\n'
+                                       'mupen64plus-rsp-plugin = "parallel"\n')
+        with open(override, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\n')
+        r.deferred_core_setup("mupen64plus_next", {"n64_video": "gliden64"})
         with open(options, encoding="utf-8") as f:
             self.assertEqual(f.read(), 'mupen64plus-rdp-plugin = "gliden64"\nmupen64plus-rsp-plugin = "hle"\n')
-        with open(override, encoding="utf-8") as f:
-            self.assertIn('video_driver = "glcore"', f.read())
+        os.unlink(game_opt)
         auto = os.path.join(r.RA_DIR, "states", "Mupen64Plus-Next", os.path.basename(rom)[:-4] + ".state.auto")
         os.makedirs(os.path.dirname(auto), exist_ok=True)
         open(auto, "w").close()
@@ -792,6 +806,22 @@ class ResumeTests(unittest.TestCase):
         mgba = core.replace("mupen64plus_next", "mgba")
         self.assertFalse(r.command("retroarch", ["-L", mgba, rom], on=True)[3])  # les autres cœurs : RetroArch seul
         self.assertEqual(r.LOAD_KEYS["retroarch"], ["KEY_F4"])
+
+    def test_retroarch_config_dir(self):
+        """Dossier des réglages par cœur : celui que RetroArch lit (rgui_config_directory)."""
+        r = self.resume
+        d = tempfile.mkdtemp()
+        cfg = os.path.join(d, "retroarch.cfg")
+        self.assertEqual(r.ra_config_dir(cfg), os.path.join(d, "config"))          # pas de fichier
+        cases = {'rgui_config_directory = "~/.var/app/org.libretro.RetroArch/config/retroarch/config"\n':
+                 os.path.join(r.HOME, ".var/app/org.libretro.RetroArch/config/retroarch/config"),
+                 'rgui_config_directory = "default"\n': d,
+                 'rgui_config_directory = "/srv/ra/config"\n': "/srv/ra/config",
+                 'video_driver = "gl"\n': os.path.join(d, "config")}
+        for text, want in cases.items():
+            with open(cfg, "w", encoding="utf-8") as f:
+                f.write(text)
+            self.assertEqual(r.ra_config_dir(cfg), want, text)
 
     def test_restart_from_scratch(self):
         """Menu du bouton Xbox › Recommencer depuis le début : le lanceur relance le jeu sans la partie

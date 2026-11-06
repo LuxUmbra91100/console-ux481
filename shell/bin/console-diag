@@ -12,6 +12,13 @@ VAR=$HOME/.var/app
 LOGS=$HOME/.local/state/console/logs
 section() { printf '\n===== %s =====\n' "$1"; }
 
+section "Version"
+[[ -r /etc/console/install.env ]] && . /etc/console/install.env
+echo "Installée : $(cat /opt/console/VERSION 2>/dev/null || echo inconnue)"
+if [[ -n ${CONSOLE_REPO:-} && -d $CONSOLE_REPO/.git ]]; then
+  echo "Dépôt     : $(git -C "$CONSOLE_REPO" log -1 --format='%h du %cd' --date=format-local:'%d/%m/%Y %H:%M' 2>/dev/null)"
+fi
+
 section "Écrans"
 if outputs=$(swaymsg -t get_outputs -r 2>/dev/null); then
   jq -r '.[] | "\(.name)  actif=\(.active)  mode=\(.current_mode.width // "-")x\(.current_mode.height // "-")  échelle=\(.scale // "-")  position=\(.rect.x),\(.rect.y)  taille=\(.rect.width)x\(.rect.height)"' <<< "$outputs"
@@ -24,11 +31,16 @@ swaymsg -t get_tree -r 2>/dev/null | jq -r '.. | objects | select((.pid? // 0) >
 
 section "RetroArch"
 RA=$VAR/org.libretro.RetroArch/config/retroarch
-grep -E '^(video_driver|video_context_driver|driver_switch_enable|video_fullscreen|savestate_auto_save|savestate_auto_load) ' "$RA/retroarch.cfg" 2>/dev/null
+grep -E '^(video_driver|video_context_driver|driver_switch_enable|video_fullscreen|savestate_auto_save|savestate_auto_load|rgui_config_directory|global_core_options|game_specific_options|auto_overrides_enable|core_options_path) ' "$RA/retroarch.cfg" 2>/dev/null
 echo "Cœurs :"
 for c in "$RA"/cores/*_libretro.so; do [[ -f $c ]] && printf '  %-34s %s octets\n' "$(basename "$c")" "$(stat -c %s "$c")"; done
-echo "Réglages propres à un cœur :"
-find "$RA/config" -name '*.cfg' -printf '  %P\n' 2>/dev/null
+echo "Réglages propres à un cœur ou à un jeu :"
+find "$RA/config" -type f \( -name '*.cfg' -o -name '*.opt' \) -printf '  %P\n' 2>/dev/null
+for f in "$RA"/config/Mupen64Plus-Next/*; do
+  [[ -f $f ]] || continue
+  echo "  $(basename "$f") :"
+  grep -E '^(mupen64plus-(rdp|rsp)-plugin|mupen64plus-cpucore|video_driver|savestate_auto_load|state_slot) ' "$f" | sed 's/^/    /'
+done
 
 section "Dolphin"
 grep -HE '^(GFXBackend|Fullscreen|RenderToMain|FullscreenDisplayRes|AspectRatio|InternalResolution|wideScreenHack|Crop) ' \
@@ -45,7 +57,13 @@ section "Derniers journaux des émulateurs"
 for f in "$LOGS"/emu-*.log "$LOGS"/game.log; do
   [[ -f $f ]] || continue
   echo "--- $(basename "$f")  ($(date -r "$f" '+%d/%m %H:%M'))"
-  grep -vE '^\s*$' "$f" | tail -n 45
+  head -n 3 "$f" | grep '^# '                   # commande lancée et version de la console
+  if [[ $f == */emu-retroarch.log ]]; then
+    echo "  [lignes clés]"
+    grep -aE '\[(Core|Overrides|Config)\]|SET_HW_RENDER|driver forced|cached driver|\[Vulkan\]|ERROR|WARN|mupen64plus: (Selected|Requested)' "$f" | head -n 40
+    echo "  [fin du journal]"
+  fi
+  grep -vE '^\s*$' "$f" | tail -n 40
 done
 if [[ -f $HOME/ES-DE/logs/es_log.txt ]]; then
   echo "--- ES-DE"
