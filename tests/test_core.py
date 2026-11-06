@@ -4,9 +4,11 @@ Lancer :  python3 -m unittest discover -s tests -v
 """
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -216,6 +218,18 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(library.find_game("Xénoblade")[1], xeno)
         self.assertIsNone(library.find_game("lisezmoi"))
         self.assertIsNone(library.find_game("   "))
+
+    def test_game_of(self):
+        """Fichier passé à l'émulateur → système, chemin dans la bibliothèque, nom du jeu."""
+        roms = os.path.join(TMP_HOME, "ROMs")
+        sm64 = os.path.join(roms, "n64", "Super Mario 64 (Europe).z64")
+        self.assertEqual(library.game_of(sm64), ("n64", sm64, "Super Mario 64 (Europe)"))
+        ff = os.path.join(roms, "psx", "FF7.m3u")
+        os.makedirs(ff, exist_ok=True)
+        open(os.path.join(ff, "FF7.m3u"), "w").close()
+        self.assertEqual(library.game_of(os.path.join(ff, "FF7.m3u")), ("psx", ff, "FF7"))
+        self.assertEqual(library.game_of("/ailleurs/jeu.gb"), (None, "/ailleurs/jeu.gb", "jeu"))
+        self.assertEqual(library.game_of(None), (None, None, None))
 
     def test_set_startup(self):
         library.set_startup("ps2")
@@ -824,6 +838,54 @@ class ResumeTests(unittest.TestCase):
         mgba = core.replace("mupen64plus_next", "mgba")
         self.assertFalse(r.command("retroarch", ["-L", mgba, rom], on=True)[3])  # les autres cœurs : RetroArch seul
         self.assertEqual(r.LOAD_KEYS["retroarch"], ["KEY_F4"])
+
+    def test_esde_launch_is_relayed_to_console(self):
+        """Lancé par ES-DE, console-emu confie le jeu à la console et attend la fin de son lanceur ;
+        console injoignable : il le lance lui-même."""
+        runtime, bindir = tempfile.mkdtemp(), tempfile.mkdtemp()
+        runs = os.path.join(bindir, "runs.txt")
+        with open(os.path.join(bindir, "flatpak"), "w") as f:
+            f.write(f'#!/bin/sh\necho "$@" >> "{runs}"\nexit 0\n')
+        os.chmod(os.path.join(bindir, "flatpak"), 0o755)
+        rom = os.path.join(TMP_HOME, "Reprise", "gb", "Tetris.gb")
+        os.makedirs(os.path.dirname(rom), exist_ok=True)
+        open(rom, "w").close()
+        game = subprocess.Popen(["sleep", "1.5"])                         # le lanceur côté console
+        got = []
+
+        def serve():
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            srv.bind(os.path.join(runtime, "console-shell.sock"))
+            srv.listen(1)
+            conn, _ = srv.accept()
+            with conn:
+                got.append(json.loads(conn.recv(65536).decode()))
+                conn.sendall((json.dumps({"ok": True, "pid": game.pid}) + "\n").encode())
+            srv.close()
+        th = threading.Thread(target=serve, daemon=True)
+        th.start()
+        time.sleep(0.2)
+        env = dict(os.environ, HOME=TMP_HOME, XDG_RUNTIME_DIR=runtime, CONSOLE_FROM_ESDE="1",
+                   PATH=bindir + os.pathsep + os.environ["PATH"])
+        cmd = [sys.executable, os.path.join(ROOT, "shell", "bin", "console-emu"), "retroarch", "-L", "/x/gambatte_libretro.so", rom]
+        t0 = time.monotonic()
+        p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+        game.wait()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertGreaterEqual(time.monotonic() - t0, 1.0)                 # a attendu la fin du jeu
+        self.assertEqual(got[0]["cmd"], "esde-game")
+        self.assertEqual(json.loads(got[0]["args"][0]), {"emu": "retroarch", "args": ["-L", "/x/gambatte_libretro.so", rom]})
+        self.assertFalse(os.path.exists(runs))                              # pas lancé deux fois
+        p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)   # plus de console
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(runs) as f:
+            self.assertIn(rom, f.read())
+        self.assertIn("lancement direct", p.stderr)
+        env["CONSOLE_EMU_DIRECT"] = "1"                                     # lanceur côté console
+        os.unlink(runs)
+        subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+        with open(runs) as f:
+            self.assertIn(rom, f.read())
 
     def test_retroarch_config_dir(self):
         """Dossier des réglages par cœur : celui que RetroArch lit (rgui_config_directory)."""

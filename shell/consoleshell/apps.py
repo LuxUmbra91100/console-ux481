@@ -165,7 +165,11 @@ class AppManager:
             self.last_app = next(iter(self.apps), None)
         if self.foreground == app_id:
             self.foreground = None
-            self.shell.show_home()
+            back = (app.meta or {}).get("return_to")
+            if back in self.apps:
+                self.show(back)                       # jeu lancé depuis ES-DE : retour à ES-DE
+            else:
+                self.shell.show_home()
         self.shell.on_app_exit(app)
         self.shell.on_apps_changed()
 

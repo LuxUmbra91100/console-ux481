@@ -104,6 +104,18 @@ def count_games(system):
     return n
 
 
+def game_of(rom):
+    """(système, chemin dans la bibliothèque, nom) du jeu dont rom est le fichier passé à
+    l'émulateur ; système None hors des dossiers de jeux."""
+    if not rom:
+        return None, None, None
+    parent = os.path.dirname(rom)
+    path = parent if dir_as_file(parent) and os.path.basename(parent) == os.path.basename(rom) else rom
+    rel = os.path.relpath(path, ROMS_DIR)
+    system = None if rel.startswith("..") else rel.split(os.sep)[0]
+    return (system if system in SYSTEM_INDEX else None), path, os.path.splitext(os.path.basename(path))[0]
+
+
 def _fold(text):
     """Minuscules sans accents, pour comparer des noms de jeux."""
     return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))

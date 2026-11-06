@@ -354,6 +354,9 @@ tes jeux).
   (et les jeux GameCube/PS2 prévus pour) sans les déformer, avec des bandes noires sur les côtés
   pour les jeux en 4:3 ; « Remplir l'écran » étire l'image sur toute la TV (Dolphin et PCSX2).
 - Pendant un jeu : bouton Xbox › **Sauvegarder / Charger l'état**, **Quitter le jeu**.
+- Un jeu choisi dans *Jeux* (ES-DE) est confié à la console : il s'ouvre exactement comme depuis
+  l'accueil (écran de lancement, menu du bouton Xbox) et ES-DE revient quand on le quitte. Lancés
+  sous la fenêtre d'ES-DE, les jeux RetroArch restaient figés sur un écran noir.
   Dans RetroArch, maintenir Start 2 s ouvre son propre menu (shaders, options).
 
 **Reprendre là où tu t'étais arrêté** (*Réglages › Jeux*, activé par défaut)

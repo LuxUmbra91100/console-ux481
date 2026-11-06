@@ -1,5 +1,6 @@
 """console-shell : l'écran d'accueil et le « système » de la console."""
 import datetime
+import json
 import os
 import queue
 import shutil
@@ -913,6 +914,7 @@ class Shell:
             return True
         library.set_startup(system)
         self.apps.launch("games", "Jeux", [f"{PREFIX}/bin/es-de", "--no-splash", "--no-update-check"], "esde",
+                         env={"CONSOLE_FROM_ESDE": "1"},     # console-emu nous relaie ses lancements
                          splash={"title": "Jeux", "kind": "games", "icon": first_existing(ICON_CANDIDATES["games"])})
         return True
 
@@ -944,6 +946,34 @@ class Shell:
         self.close_panel()
         self.launch_game(system, path, name)
         return {"ok": True, "jeu": name, "système": system}
+
+    def esde_game(self, raw):
+        """console-emu, lancé par ES-DE, nous confie le jeu : il tourne comme depuis l'accueil (son
+        propre espace de travail, écran de lancement, menu du bouton Xbox) et la console revient à
+        ES-DE quand il se termine. Réponse : {"ok", "pid"} du lanceur, qu'ES-DE attend."""
+        try:
+            req = json.loads(raw)
+            emu, args = req["emu"], [str(a) for a in req["args"]]
+        except (ValueError, KeyError, TypeError):
+            return {"error": "requête invalide"}
+        if emu not in resume.FLATPAKS:
+            return {"error": f"émulateur inconnu : {emu}"}
+        if self.apps.running("game"):
+            self.toast("Un jeu tourne déjà", sub="Quitte-le d'abord (bouton Xbox › Quitter le jeu)", icon="warning")
+            return {"error": "un jeu tourne déjà", "busy": True}
+        system, path, name = library.game_of(resume.find_rom(args))
+        cover = library.media(system, path) if system else None
+        if system:
+            library.remember(system, path, name)     # visible tout de suite dans « Reprendre »
+        self.close_panel()
+        app = self.apps.launch("game", name or "Jeu", [f"{PREFIX}/bin/console-emu", emu] + args, "game",
+                               env={"CONSOLE_EMU_DIRECT": "1"},
+                               meta={"art": cover, "system": system, "return_to": "games"},
+                               splash={"title": name or "Jeu", "kind": "game", "art": cover,
+                                       "sub": library.SYSTEM_INDEX[system][1] if system else ""})
+        if app is None or not app.pid:
+            return {"error": "lancement impossible"}
+        return {"ok": True, "pid": app.pid}
 
     def launch_moonlight(self):
         if self.apps.running("moonlight"):
@@ -1749,6 +1779,8 @@ class Shell:
             return {"ok": bool(self.launch_tile(args[0]))}
         elif cmd == "jeu" and args:
             return self.ctl_game(" ".join(args))
+        elif cmd == "esde-game" and args:
+            return self.esde_game(args[0])
         elif cmd == "run" and args:
             # Dépannage : lance n'importe quelle commande comme une application de la console.
             self.apps.launch("debug", args[0], list(args), "debug")

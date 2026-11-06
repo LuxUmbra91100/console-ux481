@@ -4,17 +4,23 @@
 ÉMULATEUR : retroarch, dolphin, pcsx2 ou azahar. Utilisé par l'accueil et par ES-DE (règles de
 recherche d'émulateurs dans ~/ES-DE/custom_systems/es_find_rules.xml). Ajoute l'état de reprise du
 jeu s'il y en a un, et retient à la fermeture celui qui vient d'être enregistré.
+
+Lancé par ES-DE, il demande à la console de lancer le jeu elle-même, exactement comme depuis
+l'accueil, et attend qu'il se termine : ES-DE reprend alors la main. Lancés par ES-DE et sous sa
+fenêtre, les jeux RetroArch restaient figés sur un écran noir.
 """
+import json
 import os
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
 from consoleshell import resume  # noqa: E402
-from consoleshell.config import LOG_DIR  # noqa: E402
+from consoleshell.config import CONTROL_SOCKET, LOG_DIR  # noqa: E402
 
 LOG_LIMIT = 5 << 20
 VERSION = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "VERSION")   # posé à l'installation
@@ -56,11 +62,69 @@ def run_logged(cmd, emu):
     return code
 
 
+def ask_console(cmd, *args, timeout=8):
+    """Envoie une commande au shell de la console (comme console-ctl) et renvoie sa réponse."""
+    msg = json.dumps({"cmd": cmd, "args": list(args)}) + "\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(timeout)
+        s.connect(CONTROL_SOCKET)
+        s.sendall(msg.encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    return json.loads(data.decode("utf-8", "replace") or "null")
+
+
+def _start_time(pid):
+    """Date de démarrage du processus (pour ne pas le confondre avec un autre qui réutiliserait son
+    numéro), ou None s'il est terminé (zombie compris)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+    return None if fields[0] in ("Z", "X") else fields[19]
+
+
+def via_console(emu, args):
+    """Lancé par ES-DE : la console lance le jeu (son propre espace, écran de lancement, menu du
+    bouton Xbox) et on attend sa fin. Renvoie le code à rendre à ES-DE, ou None pour lancer
+    directement (console injoignable, ou lancement déjà relayé)."""
+    if os.environ.get("CONSOLE_FROM_ESDE") != "1" or os.environ.get("CONSOLE_EMU_DIRECT") == "1":
+        return None
+    try:
+        reply = ask_console("esde-game", json.dumps({"emu": emu, "args": args}))
+    except (OSError, ValueError) as exc:
+        print(f"console-emu : console injoignable ({exc}), lancement direct", file=sys.stderr)
+        return None
+    pid = reply.get("pid") if isinstance(reply, dict) else None
+    if isinstance(reply, dict) and reply.get("busy"):
+        print("console-emu : un autre jeu tourne déjà, lancement annulé", file=sys.stderr)
+        return 1
+    if not isinstance(pid, int):
+        why = reply.get("error") if isinstance(reply, dict) else reply
+        print(f"console-emu : la console n'a pas lancé le jeu ({why}), lancement direct", file=sys.stderr)
+        return None
+    print(f"console-emu : jeu lancé par la console (processus {pid}), ES-DE attend sa fin", file=sys.stderr)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_IGN)       # ES-DE fermé entre-temps : on attend quand même
+    started = _start_time(pid)
+    while started is not None and _start_time(pid) == started:
+        time.sleep(0.5)
+    return 0
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in resume.FLATPAKS:
         print(__doc__.strip(), file=sys.stderr)
         return 2
     emu, args = sys.argv[1], sys.argv[2:]
+    relayed = via_console(emu, args)
+    if relayed is not None:
+        return relayed
     try:
         cmd, rom, state, hotkey = resume.command(emu, args)
     except Exception as exc:  # noqa: BLE001 — la reprise ne doit jamais empêcher de jouer
