@@ -115,7 +115,7 @@
       else if (hash === 'splash') Shell._emit('open', { mode: 'splash', data: { title: 'Forza Horizon 5', sub: 'PC-SALON', kind: 'moonlight', art: S.moonlight[0].apps[2].boxart }, settings: {} });
       else if (hash === 'sleep') Shell._emit('open', { mode: 'sleep', data: {}, settings: {} });
       else if (hash === 'menu-moonlight') Shell._emit('open', { mode: 'menu', data: { app: { id: 'moonlight', title: 'Steam Big Picture', kind: 'moonlight' }, profile: 'moonlight', title: 'Moonlight', is_moonlight: true, can_pin: true, volume: { volume: 80 }, pads: S.pads }, settings: {} });
-      else if (hash === 'menu-game') Shell._emit('open', { mode: 'menu', data: { app: { id: 'games', title: 'Jeux', kind: 'esde' }, profile: 'dolphin', title: 'Dolphin', can_save: true, can_load: true, in_game: true, volume: { volume: 80 }, pads: S.pads }, settings: {} });
+      else if (hash === 'menu-game') Shell._emit('open', { mode: 'menu', data: { app: { id: 'games', title: 'Jeux', kind: 'esde' }, profile: 'dolphin', title: 'Dolphin', can_save: true, can_load: true, in_game: true, can_restart: true, volume: { volume: 80 }, pads: S.pads }, settings: {} });
       else Shell._emit('open', { mode: 'menu', data: { app: { id: 'brave', title: 'Brave', kind: 'brave' }, profile: 'brave', title: 'Brave', is_brave: true, tabs: [{ id: 't1', title: 'YouTube', active: true }, { id: 't2', title: 'Wikipédia' }], volume: { volume: 80 }, pads: S.pads }, settings: {} });
     });
   }

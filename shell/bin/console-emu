@@ -70,12 +70,29 @@ def main():
     # aussi) : on ne le relaie pas — un second SIGTERM forcerait PCSX2 à quitter sans sauvegarder.
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, signal.SIG_IGN)
-    started = time.time()
-    try:
-        code = run_logged(cmd, emu)
-    except OSError as exc:
-        print(f"console-emu : impossible de lancer {cmd[0]} ({exc})", file=sys.stderr)
-        return 127
+    pid = os.getpid()
+    while True:
+        started = time.time()
+        if rom:
+            resume.set_current(emu, rom, pid)
+        try:
+            code = run_logged(cmd, emu)
+        except OSError as exc:
+            print(f"console-emu : impossible de lancer {cmd[0]} ({exc})", file=sys.stderr)
+            resume.clear_current(pid)
+            return 127
+        if rom and resume.take_fresh(pid):
+            # Menu du bouton Xbox › Recommencer depuis le début : l'état écrit en quittant est oublié
+            # et le jeu relancé à zéro, sans repasser par l'accueil ni par ES-DE.
+            resume.forget(rom)
+            print("console-emu : on recommence depuis le début", file=sys.stderr)
+            try:
+                cmd, rom, state, _ = resume.command(emu, args)
+            except Exception:  # noqa: BLE001
+                cmd, state = ["flatpak", "run", resume.FLATPAKS[emu]] + args, None
+            continue
+        break
+    resume.clear_current(pid)
     try:
         saved = resume.after_exit(emu, rom, started, state, time.time() - started)
         if saved:

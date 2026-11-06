@@ -83,6 +83,7 @@ function menuItems() {
     if (d.can_save) it.push({ id: 'save-state', icon: 'save', label: 'Sauvegarder l\'état' });
     if (d.can_load) it.push({ id: 'load-state', icon: 'load', label: 'Charger l\'état' });
     if (d.emu_menu) it.push({ id: 'emu-menu', icon: 'settings', label: 'Menu de l\'émulateur' });
+    if (d.can_restart) it.push({ id: 'restart-fresh', icon: 'restart', label: 'Recommencer depuis le début' });
     it.push({ id: 'quit-game', icon: 'close', label: 'Quitter le jeu' });
   }
   if (d.is_moonlight) {

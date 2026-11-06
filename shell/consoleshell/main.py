@@ -836,6 +836,7 @@ class Shell:
             "profile": key, "title": prof.get("title") or (app.title if app else ""),
             "can_save": "save" in prof, "can_load": "load" in prof, "emu_menu": "emu_menu" in prof,
             "in_game": key in ("dolphin", "pcsx2", "azahar", "retroarch"),
+            "can_restart": key in EMULATOR_PROFILES and resume.current_game() is not None,
             "is_brave": bool(app and app.kind == "brave"),
             "is_moonlight": bool(app and app.kind == "moonlight"),
             "can_pin": bool(app and app.kind == "moonlight" and self.pin_for(app)),
@@ -1567,6 +1568,13 @@ class Shell:
         elif action == "emu-menu" and prof.get("emu_menu"):
             self.close_panel()
             keys(prof["emu_menu"])
+        elif action == "restart-fresh":
+            self.close_panel()
+            cur, con = resume.current_game(), self.sway.focused_view()
+            if cur and con:
+                resume.request_fresh(cur["pid"])     # le lanceur relancera le jeu à zéro
+                later(300, self.apps.close_window, con["id"])
+                later(500, self.toast, "On recommence depuis le début", "La partie mise de côté est oubliée", "restart")
         elif action == "quit-game":
             self.close_panel()
             con = self.sway.focused_view()

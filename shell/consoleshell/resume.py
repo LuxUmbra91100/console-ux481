@@ -21,7 +21,7 @@ import os
 import re
 import time
 
-from .config import HOME, SETTINGS_PATH, STATE_DIR
+from .config import HOME, RUNTIME_DIR, SETTINGS_PATH, STATE_DIR
 from .util import atomic_write, read_json, write_json
 
 VAR = os.path.join(HOME, ".var", "app")
@@ -42,6 +42,8 @@ LOAD_KEYS = {"azahar": ["KEY_LEFTCTRL", "KEY_V"], "retroarch": ["KEY_F4"]}
 # cœur → nom du cœur pour RetroArch (dossier de ses réglages propres et de ses états).
 DEFERRED_CORES = {"mupen64plus_next": "Mupen64Plus-Next"}
 RESUME_PATH = os.path.join(STATE_DIR, "resume.json")
+CURRENT_PATH = os.path.join(RUNTIME_DIR, "console-emu-current.json")   # jeu lancé par console-emu
+FRESH_PATH = os.path.join(RUNTIME_DIR, "console-emu-fresh")            # « recommencer » demandé
 RA_DIR = os.path.join(VAR, FLATPAKS["retroarch"], "config/retroarch")
 RA_CFG = os.path.join(RA_DIR, "retroarch.cfg")
 FLATPAK_ROOTS = ("/var/lib/flatpak/app", os.path.join(HOME, ".local/share/flatpak/app"))
@@ -198,6 +200,52 @@ def forget(rom):
             os.replace(path, path + ".old")
         except OSError:
             pass
+
+
+def set_current(emu, rom, pid):
+    write_json(CURRENT_PATH, {"emu": emu, "rom": rom, "pid": pid})
+
+
+def clear_current(pid):
+    cur = read_json(CURRENT_PATH, {}) or {}
+    if cur.get("pid") == pid:
+        try:
+            os.unlink(CURRENT_PATH)
+        except OSError:
+            pass
+
+
+def current_game():
+    """Jeu en cours lancé par console-emu ({emu, rom, pid}), ou None."""
+    cur = read_json(CURRENT_PATH, {}) or {}
+    pid = cur.get("pid")
+    if not pid or not cur.get("rom"):
+        return None
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return None
+    return cur
+
+
+def request_fresh(pid):
+    """Le lanceur de ce jeu le relancera depuis le début quand l'émulateur se fermera."""
+    atomic_write(FRESH_PATH, str(pid))
+
+
+def take_fresh(pid):
+    """Une relance « depuis le début » a-t-elle été demandée pour ce lanceur ? (la demande est consommée)"""
+    try:
+        with open(FRESH_PATH, encoding="utf-8") as f:
+            wanted = f.read().strip() == str(pid)
+    except OSError:
+        return False
+    if wanted:
+        try:
+            os.unlink(FRESH_PATH)
+        except OSError:
+            pass
+    return wanted
 
 
 def find_rom(args):

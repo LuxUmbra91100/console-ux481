@@ -785,6 +785,40 @@ class ResumeTests(unittest.TestCase):
         self.assertFalse(r.command("retroarch", ["-L", mgba, rom], on=True)[3])  # les autres cœurs : RetroArch seul
         self.assertEqual(r.LOAD_KEYS["retroarch"], ["KEY_F4"])
 
+    def test_restart_from_scratch(self):
+        """Menu du bouton Xbox › Recommencer depuis le début : le lanceur relance le jeu sans la partie
+        mise de côté (faux « flatpak » qui joue RetroArch : état auto écrit en quittant)."""
+        r = self.resume
+        runtime = tempfile.mkdtemp()
+        rom = os.path.join(TMP_HOME, "Reprise", "n64", "Rayman 2 (Europe).z64")
+        os.makedirs(os.path.dirname(rom), exist_ok=True)
+        open(rom, "w").close()
+        states = os.path.join(r.RA_DIR, "states", "Mupen64Plus-Next")
+        os.makedirs(states, exist_ok=True)
+        auto = os.path.join(states, "Rayman 2 (Europe).state.auto")
+        bindir = tempfile.mkdtemp()
+        log_path = os.path.join(bindir, "runs.txt")
+        with open(os.path.join(bindir, "flatpak"), "w") as f:
+            f.write("#!/bin/sh\n"
+                    f'n=$(cat "{log_path}" 2>/dev/null | wc -l); echo run >> "{log_path}"\n'
+                    f'cp "{runtime}/console-emu-current.json" "{bindir}/current-$n.json"\n'
+                    f'[ "$n" = 0 ] && printf %s "$PPID" > "{runtime}/console-emu-fresh"\n'   # le shell demande
+                    f'echo etat > "{auto}"\n'                                                 # sauvegarde auto
+                    "exit 0\n")
+        os.chmod(os.path.join(bindir, "flatpak"), 0o755)
+        env = dict(os.environ, HOME=TMP_HOME, XDG_RUNTIME_DIR=runtime, PATH=bindir + os.pathsep + os.environ["PATH"])
+        core = "/x/cores/mupen64plus_next_libretro.so"
+        p = subprocess.run([sys.executable, os.path.join(ROOT, "shell", "bin", "console-emu"), "retroarch", "-L", core, rom],
+                           env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(log_path) as f:
+            self.assertEqual(len(f.read().splitlines()), 2)                     # relancé une fois
+        self.assertTrue(os.path.exists(auto + ".old"))                          # ancien état mis de côté
+        with open(os.path.join(bindir, "current-0.json")) as f:
+            self.assertEqual(json.load(f)["rom"], rom)                          # jeu en cours connu du shell
+        self.assertFalse(os.path.exists(os.path.join(runtime, "console-emu-current.json")))
+        self.assertFalse(os.path.exists(os.path.join(runtime, "console-emu-fresh")))
+
     def test_aspect_setting(self):
         """Réglages › Jeux › Format d'image : Wii toujours en 16:9, « Remplir l'écran » étire (Dolphin, PCSX2)."""
         r = self.resume

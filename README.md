@@ -357,8 +357,9 @@ tes jeux).
 
 Quand tu quittes un jeu (bouton Xbox › *Quitter le jeu*, fermeture depuis l'accueil, ou en
 éteignant la console), la partie est mise de côté ; au lancement suivant, depuis l'accueil
-comme depuis ES-DE, elle reprend exactement là. Sur l'accueil, le jeu affiche alors Ⓐ
-*Reprendre*, et Ⓨ propose *Recommencer depuis le début*.
+comme depuis ES-DE, elle reprend exactement là. Pour repartir de zéro : pendant le jeu,
+bouton Xbox › *Recommencer depuis le début* (le jeu se relance sans la partie mise de côté),
+ou Ⓨ sur le jeu dans la rangée *Reprendre* de la tuile *Jeux*.
 
 | Émulateur | Comment |
 |---|---|
