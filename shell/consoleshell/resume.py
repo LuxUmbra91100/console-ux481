@@ -290,17 +290,39 @@ def _core_of(args):
     return None
 
 
-def deferred_core_setup(core):
-    """Réglages propres au cœur : pas de chargement automatique au démarrage, et l'emplacement « auto »
-    pour la touche « charger » (celle qu'envoie la console quelques secondes après le lancement)."""
+# Affichage N64 (Réglages › Jeux › Image) → pilote vidéo de RetroArch, RDP et RSP de Mupen64Plus-Next.
+# GLideN64 (OpenGL) reste noir sur cette machine ; ParaLLEl passe par Vulkan, qui marche (Dolphin
+# l'utilise) ; Angrylion dessine sur le processeur : le plus sûr, mais le plus lent.
+N64_VIDEO = {
+    "parallel": ("vulkan", "parallel", "parallel"),
+    "gliden64": ("glcore", "gliden64", "hle"),
+    "angrylion": ("glcore", "angrylion", "parallel"),
+}
+
+
+def deferred_core_setup(core, settings=None):
+    """Réglages propres au cœur : pas de chargement automatique au démarrage, emplacement « auto » pour
+    la touche « charger » (envoyée par la console après le lancement) ; pour la N64, le moteur
+    d'affichage choisi."""
     name = DEFERRED_CORES[core]
-    path = os.path.join(RA_DIR, "config", name, name + ".cfg")
+    base = os.path.join(RA_DIR, "config", name)
+    cfg = {"savestate_auto_load": '"false"', "state_slot": '"-1"'}
+    if core == "mupen64plus_next":
+        driver, rdp, rsp = N64_VIDEO.get((settings or {}).get("n64_video"), N64_VIDEO["parallel"])
+        cfg["video_driver"] = f'"{driver}"'
+        _cfg_lines(os.path.join(base, name + ".opt"),
+                   {"mupen64plus-rdp-plugin": f'"{rdp}"', "mupen64plus-rsp-plugin": f'"{rsp}"'})
+    _cfg_lines(os.path.join(base, name + ".cfg"), cfg)
+    return name
+
+
+def _cfg_lines(path, values):
+    """Écrit des « clé = valeur » dans un fichier de réglages RetroArch, sans toucher au reste."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if not os.path.exists(path):
         atomic_write(path, "")
-    for key, value in (("savestate_auto_load", '"false"'), ("state_slot", '"-1"')):
+    for key, value in values.items():
         _cfg_line(path, key, value)
-    return name
 
 
 def _cfg_line(path, key, value):
@@ -328,7 +350,7 @@ def command(emu, args, on=None):
         retroarch_config(on)
         core = _core_of(args)
         if core in DEFERRED_CORES:
-            deferred_core_setup(core)
+            deferred_core_setup(core, settings)
             if on and rom and _retroarch_auto_states(rom):
                 hotkey = True                  # la console envoie « charger » une fois le jeu à l'écran
     elif on and rom:

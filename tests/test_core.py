@@ -775,7 +775,15 @@ class ResumeTests(unittest.TestCase):
         self.assertIn("--verbose", cmd)
         override = os.path.join(r.RA_DIR, "config", "Mupen64Plus-Next", "Mupen64Plus-Next.cfg")
         with open(override, encoding="utf-8") as f:
-            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\n')
+            self.assertEqual(f.read(), 'savestate_auto_load = "false"\nstate_slot = "-1"\nvideo_driver = "vulkan"\n')
+        options = os.path.join(r.RA_DIR, "config", "Mupen64Plus-Next", "Mupen64Plus-Next.opt")
+        with open(options, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'mupen64plus-rdp-plugin = "parallel"\nmupen64plus-rsp-plugin = "parallel"\n')
+        r.deferred_core_setup("mupen64plus_next", {"n64_video": "gliden64"})       # réglage changé
+        with open(options, encoding="utf-8") as f:
+            self.assertEqual(f.read(), 'mupen64plus-rdp-plugin = "gliden64"\nmupen64plus-rsp-plugin = "hle"\n')
+        with open(override, encoding="utf-8") as f:
+            self.assertIn('video_driver = "glcore"', f.read())
         auto = os.path.join(r.RA_DIR, "states", "Mupen64Plus-Next", os.path.basename(rom)[:-4] + ".state.auto")
         os.makedirs(os.path.dirname(auto), exist_ok=True)
         open(auto, "w").close()

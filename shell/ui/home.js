@@ -664,6 +664,9 @@ class SettingsLayer extends Layer {
         ? 'Image étirée sur tout l\'écran : plus de bandes noires, les jeux 4:3 sont un peu élargis'
         : '16:9 quand le jeu le permet (Wii comprise), sinon bandes noires sur les côtés',
         'emu_aspect', [['auto', 'Automatique'], ['fill', 'Remplir l\'écran']]));
+      out.push(choiceRow('display', 'Affichage Nintendo 64', s.n64_video === 'gliden64' ? 'OpenGL : le plus rapide, mais peut rester noir sur cette machine'
+        : s.n64_video === 'angrylion' ? 'Rendu par le processeur : le plus fidèle et le plus sûr, mais lent' : 'Vulkan : fidèle et rapide (conseillé)',
+        'n64_video', [['parallel', 'ParaLLEl'], ['gliden64', 'GLideN64'], ['angrylion', 'Angrylion']]));
       out.push({ group: 'BIOS' });
       biosRows(this.bios, out, () => { this.close(); openUpload(); });
       out.push({ group: 'Jaquettes' });

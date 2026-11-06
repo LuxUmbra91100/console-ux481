@@ -312,7 +312,7 @@ rapport (textes, images…) sont ignorés. Un jeu déjà présent n'est pas copi
 |---|---|---|---|
 | `nes` | NES | `.nes` | RetroArch (Mesen) |
 | `snes` | Super Nintendo | `.sfc`, `.smc` | RetroArch (Snes9x) |
-| `n64` | Nintendo 64 | `.z64`, `.n64`, `.v64` | RetroArch (Mupen64Plus-Next) |
+| `n64` | Nintendo 64 | `.z64`, `.n64`, `.v64` | RetroArch (Mupen64Plus-Next, affichage ParaLLEl/Vulkan) |
 | `gb`, `gbc` | Game Boy, Game Boy Color | `.gb`, `.gbc` | RetroArch (Gambatte) |
 | `gba` | Game Boy Advance | `.gba` | RetroArch (mGBA) |
 | `nds` | Nintendo DS | `.nds` | RetroArch (melonDS DS) |
@@ -347,6 +347,9 @@ tes jeux).
   *Jeux* (ES-DE), ≡ › *Scraper* avec un compte gratuit screenscraper.fr.
 - La manette est configurée d'office dans tous les émulateurs, y compris Dolphin
   (GameCube, et Wiimote + Nunchuk pour la Wii : stick droit = pointeur, R3 = recentrer).
+- **Affichage Nintendo 64** (*Réglages › Jeux › Image*) : ParaLLEl (Vulkan, conseillé), GLideN64
+  (OpenGL, le plus rapide mais il reste noir sur cette machine) ou Angrylion (processeur : le plus
+  sûr, mais lent). Si un jeu N64 reste noir ou rame, change ce réglage et relance le jeu.
 - **Format d'image** (*Réglages › Jeux › Image*) : « Automatique » affiche les jeux Wii en 16:9
   (et les jeux GameCube/PS2 prévus pour) sans les déformer, avec des bandes noires sur les côtés
   pour les jeux en 4:3 ; « Remplir l'écran » étire l'image sur toute la TV (Dolphin et PCSX2).
